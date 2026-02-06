@@ -14,14 +14,27 @@ Inspired by [OpenClaw](https://openclaw.ai/), I wanted to peel back what was und
 
 ## Quick Start
 
-Clone the repo — the agent can read its own source, understand how it's built, and modify itself. Very meta.
+The agent can read its own source, understand how it's built, and modify itself. Very meta.
+
+**Docker (recommended):**
+
+```bash
+docker run -d --restart unless-stopped \
+  -e TELEGRAM_BOT_TOKEN=... \
+  -e TELEGRAM_CHAT_ID=... \
+  -e ANTHROPIC_API_KEY=... \
+  -v jeeves-workspace:/app/workspace \
+  ghcr.io/eddmann/jeeves:latest
+```
+
+**Local:**
 
 ```bash
 git clone https://github.com/eddmann/jeeves.git
 cd jeeves
-make deps                  # install dependencies
-make login                 # OAuth via Claude Pro/Max
-# or: make login/key       # API key login
+make deps             # install dependencies
+make login            # OAuth via Claude Pro/Max
+# or: make login/key  # API key login
 ```
 
 Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in your environment or workspace `.env`, then:
@@ -30,7 +43,7 @@ Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in your environment or workspace
 make dev
 ```
 
-Message your bot on Telegram. It responds.
+Message your bot on Telegram. It responds. See [docs/DOCKER.md](docs/DOCKER.md) for full container setup.
 
 ## How It Works
 
@@ -50,15 +63,26 @@ Skills are `SKILL.md` files with YAML frontmatter. Ask the agent to create new o
 
 ## Configuration
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TELEGRAM_BOT_TOKEN` | — | Telegram bot token (required) |
-| `TELEGRAM_CHAT_ID` | — | Chat ID for cron/heartbeat output |
-| `ANTHROPIC_API_KEY` | — | API key (alternative to OAuth login) |
-| `WORKSPACE_DIR` | `./workspace` | Workspace root |
-| `HEARTBEAT_INTERVAL_MINUTES` | `30` | Minutes between heartbeat checks |
-| `HEARTBEAT_ACTIVE_START` / `_END` | `08:00` / `23:00` | Active hours window |
-| `LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
+| Variable                          | Default           | Description                          |
+| --------------------------------- | ----------------- | ------------------------------------ |
+| `TELEGRAM_BOT_TOKEN`              | —                 | Telegram bot token (required)        |
+| `TELEGRAM_CHAT_ID`                | —                 | Chat ID for cron/heartbeat output    |
+| `ANTHROPIC_API_KEY`               | —                 | API key (alternative to OAuth login) |
+| `WORKSPACE_DIR`                   | `./workspace`     | Workspace root                       |
+| `HEARTBEAT_INTERVAL_MINUTES`      | `30`              | Minutes between heartbeat checks     |
+| `HEARTBEAT_ACTIVE_START` / `_END` | `08:00` / `23:00` | Active hours window                  |
+| `LOG_LEVEL`                       | `info`            | `debug` / `info` / `warn` / `error`  |
+
+## Docker
+
+The recommended way to run Jeeves. Pre-built multi-arch images (`linux/amd64`, `linux/arm64`) are [published to GHCR](https://ghcr.io/eddmann/jeeves) on every push to main. Or build locally:
+
+```bash
+make docker/run    # build + run production
+make docker/dev    # build + run dev (bind-mounts repo)
+```
+
+See [docs/DOCKER.md](docs/DOCKER.md) for volumes, auth, env vars, and logs.
 
 ## Testing
 
@@ -81,6 +105,8 @@ make status         Show auth, workspace, skills info
 make test           Run all tests
 make lint           Run ESLint
 make fmt            Format code
+make docker/run     Build + run production container
+make docker/dev     Build + run dev container
 ```
 
 ## License

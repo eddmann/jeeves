@@ -63,6 +63,20 @@ fmt/check: ## Check formatting
 
 can-release: lint test ## CI gate - all checks
 
+##@ Docker
+
+docker/build: ## Build production image
+	docker build --target prod -t jeeves .
+
+docker/build-dev: ## Build dev image
+	docker build --target dev -t jeeves-dev .
+
+docker/run: docker/build ## Run production container
+	docker run -it --rm --env-file .env -v jeeves-workspace:/app/workspace jeeves
+
+docker/dev: docker/build-dev ## Run dev container (bind-mount repo)
+	docker run -it --rm --env-file .env -v $(PWD):/app jeeves-dev
+
 ##@ Utilities
 
 clean: ## Clean build artifacts

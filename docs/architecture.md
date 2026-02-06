@@ -75,7 +75,7 @@ interface AgentContext {
   workspaceFiles: WorkspaceFile[];
   sessionStore: SessionStore;
   sessionKey: string;
-  callLLM?: typeof callLLM;    // injectable for testing
+  callLLM?: typeof callLLM; // injectable for testing
 }
 ```
 
@@ -89,6 +89,7 @@ Wraps `@anthropic-ai/sdk` with streaming. Supports two auth modes:
 - **OAuth stealth mode**: uses `authToken` with special headers and tool name remapping to look like Claude Code (required for OAuth tokens from Claude Pro/Max subscriptions)
 
 The stealth layer (`src/auth/stealth.ts`) handles:
+
 - Custom HTTP headers mimicking Claude Code's user-agent and beta flags
 - Tool name remapping: `bash` -> `Bash`, `read` -> `Read`, `webfetch` -> `WebFetch`
 - A system prompt prefix identifying as Claude Code
@@ -97,13 +98,13 @@ The stealth layer (`src/auth/stealth.ts`) handles:
 
 Five tools, all registered via `allTools()` in `src/tools/index.ts`:
 
-| Tool | File | Factory | Description |
-|------|------|---------|-------------|
-| `bash` | `tools/bash.ts` | `createBashTool(workspaceDir)` | Shell command execution via `Bun.spawnSync`. Commands run in workspace dir with configurable timeout. |
-| `read` | `tools/read-file.ts` | `createReadFileTool(workspaceDir)` | Read file contents with line numbers. Relative paths resolve from workspace. |
-| `write` | `tools/write-file.ts` | `createWriteFileTool(workspaceDir)` | Write content to files, creating parent directories as needed. |
-| `webfetch` | `tools/web-fetch.ts` | `webFetchTool` (singleton) | Fetch URLs, extract readable content using `@mozilla/readability` + `linkedom`. Non-HTML returned raw. Content truncated at 10,000 chars. |
-| `cron` | `tools/cron.ts` | `createCronTool(scheduler)` | Manage scheduled jobs: add/list/remove/run/status. |
+| Tool       | File                  | Factory                             | Description                                                                                                                               |
+| ---------- | --------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `bash`     | `tools/bash.ts`       | `createBashTool(workspaceDir)`      | Shell command execution via `Bun.spawnSync`. Commands run in workspace dir with configurable timeout.                                     |
+| `read`     | `tools/read-file.ts`  | `createReadFileTool(workspaceDir)`  | Read file contents with line numbers. Relative paths resolve from workspace.                                                              |
+| `write`    | `tools/write-file.ts` | `createWriteFileTool(workspaceDir)` | Write content to files, creating parent directories as needed.                                                                            |
+| `webfetch` | `tools/web-fetch.ts`  | `webFetchTool` (singleton)          | Fetch URLs, extract readable content using `@mozilla/readability` + `linkedom`. Non-HTML returned raw. Content truncated at 10,000 chars. |
+| `cron`     | `tools/cron.ts`       | `createCronTool(scheduler)`         | Manage scheduled jobs: add/list/remove/run/status.                                                                                        |
 
 All tools implement the `Tool` interface:
 
@@ -127,6 +128,7 @@ Dual-mode auth with priority order:
 3. **`ANTHROPIC_API_KEY`** environment variable (fallback)
 
 `AuthStorage` manages credentials:
+
 - Persists to `auth.json` with `0o600` permissions
 - OAuth token refresh uses `proper-lockfile` for safe concurrent access across processes
 - Refresh function is injectable via constructor for testing
@@ -198,6 +200,7 @@ On first run, `initWorkspace()` creates the directory structure and seeds conven
 Skills are `SKILL.md` files with YAML frontmatter, discovered recursively from `skills/` (bundled) and `workspace/skills/` (user). Workspace skills override bundled ones by name.
 
 Validation rules:
+
 - Must have `name` and `description` in frontmatter
 - Name must match parent directory name
 - Names: lowercase alphanumeric + hyphens, max 64 chars
@@ -222,6 +225,7 @@ JSONL structured logger writing to daily rotating files (`workspace/logs/YYYY-MM
 ## Progress Updates (`src/progress.ts`)
 
 Formats agent iteration progress for display in Telegram:
+
 - Thinking indicators with step numbers
 - Tool-specific labels ("Running command", "Reading file", etc.)
 - Multi-tool suffixes ("Reading file (2/3)")

@@ -48,36 +48,36 @@ Multiple assertions in a single test are fine when they verify different facets 
 
 Tests are organized by **feature/behavior**, not by file structure:
 
-| Test file | What it covers |
-|-----------|---------------|
-| `agent.test.ts` | Agent loop: LLM calls, tool execution, iteration limits, session persistence, progress reporting, system prompt building |
-| `session.test.ts` | Conversation persistence: save/load, truncation, orphaned tool_result cleanup, filesystem safety |
-| `heartbeat.test.ts` | Periodic check-ins: active hours, content detection, HEARTBEAT_OK suppression, deduplication |
-| `scheduling.test.ts` | Cron scheduler + cron tool: job CRUD, schedule types (at/every/cron), execution, persistence, tool interface |
-| `workspace.test.ts` | Workspace files: loading, truncation, initialization, template seeding, .env loading |
-| `skills.test.ts` | Skill discovery: loading, validation (name, description, directory match, format), overrides |
-| `telegram.test.ts` | Pure functions: markdown-to-HTML conversion, message splitting, progress formatting |
-| `stealth.test.ts` | OAuth stealth: tool name remapping (both directions), headers, system prompt prefix |
-| `bash-tool.test.ts` | Bash tool: command execution, exit codes, stderr, working directory, timeout |
-| `read-file-tool.test.ts` | Read tool: line numbering, path resolution, error handling |
-| `write-file-tool.test.ts` | Write tool: content writing, directory creation, overwrite, error handling |
-| `web-fetch-tool.test.ts` | Web fetch: HTTP errors, HTML extraction, non-HTML passthrough, truncation, Readability fallback |
-| `auth-storage.test.ts` | Auth storage: credential CRUD, OAuth refresh (with DI), env var fallback, file permissions, logout |
+| Test file                 | What it covers                                                                                                           |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `agent.test.ts`           | Agent loop: LLM calls, tool execution, iteration limits, session persistence, progress reporting, system prompt building |
+| `session.test.ts`         | Conversation persistence: save/load, truncation, orphaned tool_result cleanup, filesystem safety                         |
+| `heartbeat.test.ts`       | Periodic check-ins: active hours, content detection, HEARTBEAT_OK suppression, deduplication                             |
+| `scheduling.test.ts`      | Cron scheduler + cron tool: job CRUD, schedule types (at/every/cron), execution, persistence, tool interface             |
+| `workspace.test.ts`       | Workspace files: loading, truncation, initialization, template seeding, .env loading                                     |
+| `skills.test.ts`          | Skill discovery: loading, validation (name, description, directory match, format), overrides                             |
+| `telegram.test.ts`        | Pure functions: markdown-to-HTML conversion, message splitting, progress formatting                                      |
+| `stealth.test.ts`         | OAuth stealth: tool name remapping (both directions), headers, system prompt prefix                                      |
+| `bash-tool.test.ts`       | Bash tool: command execution, exit codes, stderr, working directory, timeout                                             |
+| `read-file-tool.test.ts`  | Read tool: line numbering, path resolution, error handling                                                               |
+| `write-file-tool.test.ts` | Write tool: content writing, directory creation, overwrite, error handling                                               |
+| `web-fetch-tool.test.ts`  | Web fetch: HTTP errors, HTML extraction, non-HTML passthrough, truncation, Readability fallback                          |
+| `auth-storage.test.ts`    | Auth storage: credential CRUD, OAuth refresh (with DI), env var fallback, file permissions, logout                       |
 
 ## Test Doubles Used
 
 We use precise terminology for test doubles (see table below). "Mock" is not a catch-all.
 
-| Double type | Where used | What it replaces |
-|-------------|-----------|-----------------|
-| **Stub** | `AgentContext.callLLM` | Anthropic API — returns scripted `LLMResponse` sequences |
-| **Stub** | `globalThis.fetch` in web-fetch tests | Network calls — returns canned `Response` objects |
-| **Stub** | `AuthStorage._refreshToken` | OAuth token refresh endpoint — returns canned tokens or throws |
-| **Stub** | `HeartbeatRunner.runAgent` | Agent execution — returns canned strings |
-| **Spy** | `HeartbeatRunner.sendToChannel` | Telegram sending — records calls |
-| **Spy** | `buildStubTool().calls` | Tool execution — records inputs while returning canned output |
-| **Fake** | `buildStubAuth()` | AuthStorage — in-memory credential store with no file I/O |
-| **Real** | Temp directories | Filesystem — tests create real files in `os.tmpdir()` and clean up after |
+| Double type | Where used                            | What it replaces                                                         |
+| ----------- | ------------------------------------- | ------------------------------------------------------------------------ |
+| **Stub**    | `AgentContext.callLLM`                | Anthropic API — returns scripted `LLMResponse` sequences                 |
+| **Stub**    | `globalThis.fetch` in web-fetch tests | Network calls — returns canned `Response` objects                        |
+| **Stub**    | `AuthStorage._refreshToken`           | OAuth token refresh endpoint — returns canned tokens or throws           |
+| **Stub**    | `HeartbeatRunner.runAgent`            | Agent execution — returns canned strings                                 |
+| **Spy**     | `HeartbeatRunner.sendToChannel`       | Telegram sending — records calls                                         |
+| **Spy**     | `buildStubTool().calls`               | Tool execution — records inputs while returning canned output            |
+| **Fake**    | `buildStubAuth()`                     | AuthStorage — in-memory credential store with no file I/O                |
+| **Real**    | Temp directories                      | Filesystem — tests create real files in `os.tmpdir()` and clean up after |
 
 We never mock types we don't own (grammY's `Bot`, Anthropic's `Anthropic` client, `croner`'s `Cron`). Where we need to isolate from external services, we inject our own abstractions and stub those.
 
@@ -110,8 +110,12 @@ Every test file that touches the filesystem uses the shared helper:
 import { createTempDir, cleanupTempDir } from "./helpers/temp-dir";
 
 let tmpDir: string;
-beforeEach(() => { tmpDir = createTempDir(); });
-afterEach(() => { cleanupTempDir(tmpDir); });
+beforeEach(() => {
+  tmpDir = createTempDir();
+});
+afterEach(() => {
+  cleanupTempDir(tmpDir);
+});
 ```
 
 This creates an isolated temp directory per test and removes it after. Tests are fully independent — no shared mutable state.
@@ -121,7 +125,9 @@ This creates an isolated temp directory per test and removes it after. Tests are
 Bun's `setSystemTime()` controls `Date.now()` and `new Date()`. Always reset it in `afterEach`:
 
 ```typescript
-afterEach(() => { setSystemTime(); });  // restores real time
+afterEach(() => {
+  setSystemTime();
+}); // restores real time
 ```
 
 Note: `setSystemTime` does **not** affect `setTimeout`/`setInterval` timing. We don't test timer-based behavior directly — instead we call methods like `runner.runOnce()` or `scheduler.runJob()` and assert on outcomes.
@@ -146,16 +152,16 @@ afterEach(() => {
 
 `tests/helpers/factories.ts` provides builders for common test objects:
 
-| Factory | Produces |
-|---------|----------|
-| `buildLLMResponse(overrides?)` | `LLMResponse` with sensible defaults |
-| `buildStubTool(name, result)` | `Tool` that records calls and returns a canned result |
-| `buildSkill(overrides?)` | `Skill` with defaults |
-| `buildWorkspaceFile(name, content)` | `WorkspaceFile` |
-| `buildCronJob(overrides?)` | `CronJob` with defaults |
-| `buildUserMessage(text)` | LLM user message |
-| `buildAssistantMessage(text)` | LLM assistant message |
-| `buildToolResultMessage(results)` | LLM tool result message |
+| Factory                             | Produces                                              |
+| ----------------------------------- | ----------------------------------------------------- |
+| `buildLLMResponse(overrides?)`      | `LLMResponse` with sensible defaults                  |
+| `buildStubTool(name, result)`       | `Tool` that records calls and returns a canned result |
+| `buildSkill(overrides?)`            | `Skill` with defaults                                 |
+| `buildWorkspaceFile(name, content)` | `WorkspaceFile`                                       |
+| `buildCronJob(overrides?)`          | `CronJob` with defaults                               |
+| `buildUserMessage(text)`            | LLM user message                                      |
+| `buildAssistantMessage(text)`       | LLM assistant message                                 |
+| `buildToolResultMessage(results)`   | LLM tool result message                               |
 
 These follow the **builder pattern** — provide sensible defaults so tests only specify what's relevant to their scenario.
 
