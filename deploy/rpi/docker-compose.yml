@@ -1,0 +1,26 @@
+services:
+  jeeves:
+    image: ghcr.io/eddmann/jeeves:latest
+    container_name: jeeves
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - workspace:/app/workspace
+      # Uncomment to use OAuth instead of API key:
+      # - ./auth.json:/app/auth.json
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: unless-stopped
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=300
+      - WATCHTOWER_SCOPE=jeeves
+    labels:
+      - com.centurylinklabs.watchtower.scope=jeeves
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  workspace:

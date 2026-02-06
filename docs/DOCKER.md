@@ -138,3 +138,5 @@ docker buildx build --platform linux/amd64,linux/arm64 --target prod -t jeeves .
 ```
 
 All bundled tools (Bun, uv, buns, phpx, gh) have ARM builds.
+
+For a complete Raspberry Pi deployment guide, see [`deploy/rpi/`](../deploy/rpi/).

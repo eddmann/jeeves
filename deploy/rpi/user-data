@@ -1,0 +1,13 @@
+#cloud-config
+
+packages:
+  - docker.io
+  - docker-compose-v2
+
+runcmd:
+  - systemctl enable --now docker
+  - mkdir -p /opt/jeeves
+  - cp /boot/firmware/docker-compose.yml /opt/jeeves/
+  - cp /boot/firmware/env /opt/jeeves/.env
+  - test -f /boot/firmware/auth.json && cp /boot/firmware/auth.json /opt/jeeves/
+  - cd /opt/jeeves && docker compose up -d

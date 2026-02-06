@@ -82,7 +82,7 @@ make docker/run    # build + run production
 make docker/dev    # build + run dev (bind-mounts repo)
 ```
 
-See [docs/DOCKER.md](docs/DOCKER.md) for volumes, auth, env vars, and logs.
+See [docs/DOCKER.md](docs/DOCKER.md) for volumes, auth, env vars, and logs. For Raspberry Pi deployment with auto-updates, see [`deploy/rpi/`](deploy/rpi/).
 
 ## Testing
 
