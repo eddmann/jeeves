@@ -14,6 +14,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
   && mv /root/.local/bin/uv /usr/local/bin/uv
 
+# buns (TypeScript script runner with inline dependencies)
+RUN ARCH=$(dpkg --print-architecture) \
+  && case "$ARCH" in arm64) SUFFIX=arm64 ;; amd64) SUFFIX=x64 ;; esac \
+  && curl -fsSL "https://github.com/eddmann/buns/releases/latest/download/buns-linux-${SUFFIX}" -o /usr/local/bin/buns \
+  && chmod +x /usr/local/bin/buns
+
+# phpx (PHP script runner with inline dependencies)
+RUN ARCH=$(dpkg --print-architecture) \
+  && case "$ARCH" in arm64) SUFFIX=arm64 ;; amd64) SUFFIX=x64 ;; esac \
+  && curl -fsSL "https://github.com/eddmann/phpx/releases/latest/download/phpx-linux-${SUFFIX}" -o /usr/local/bin/phpx \
+  && chmod +x /usr/local/bin/phpx
+
 # GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \

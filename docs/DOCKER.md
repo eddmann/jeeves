@@ -1,6 +1,6 @@
 # Docker
 
-Jeeves runs in a Debian-based container with Bun, uv (Python), GitHub CLI, and make. Multi-arch: `linux/amd64` and `linux/arm64`.
+Jeeves runs in a Debian-based container with Bun, uv (Python), buns, phpx, GitHub CLI, and make. Multi-arch: `linux/amd64` and `linux/arm64`.
 
 Pre-built images are published to `ghcr.io/eddmann/jeeves` on every push to main, tagged with `latest` and the commit SHA.
 
@@ -122,6 +122,8 @@ The `base` stage installs:
 
 - **Bun** — JS/TS runtime (from base image)
 - **uv** — Python package manager (installs Python on demand)
+- **buns** — TypeScript script runner with inline dependencies
+- **phpx** — PHP script runner with inline dependencies
 - **GitHub CLI** (`gh`) — for the GitHub skill
 - **curl, git, jq, make, unzip** — general-purpose tools
 
@@ -135,4 +137,4 @@ To build locally:
 docker buildx build --platform linux/amd64,linux/arm64 --target prod -t jeeves .
 ```
 
-All bundled tools (Bun, uv, gh) have ARM builds.
+All bundled tools (Bun, uv, buns, phpx, gh) have ARM builds.
