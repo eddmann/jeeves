@@ -1,0 +1,45 @@
+{
+  "name": "jeeves",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Personal AI assistant living in Telegram — powered by Claude",
+  "author": "Edd Mann <the@eddmann.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eddmann/jeeves.git"
+  },
+  "bugs": "https://github.com/eddmann/jeeves/issues",
+  "homepage": "https://github.com/eddmann/jeeves#readme",
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "build": "bun build src/index.ts --outdir dist --target bun",
+    "start": "bun run dist/index.js",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "lint": "eslint src/ tests/",
+    "lint:fix": "eslint src/ tests/ --fix",
+    "format": "prettier --write 'src/**/*.ts' 'tests/**/*.ts'",
+    "format:check": "prettier --check 'src/**/*.ts' 'tests/**/*.ts'"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.72.1",
+    "@mozilla/readability": "^0.6.0",
+    "croner": "^9.1.0",
+    "grammy": "^1.39.3",
+    "linkedom": "^0.18.12",
+    "proper-lockfile": "^4.1.2",
+    "yaml": "^2.8.2"
+  },
+  "devDependencies": {
+    "@types/proper-lockfile": "^4.1.4",
+    "@typescript-eslint/eslint-plugin": "^8.54.0",
+    "@typescript-eslint/parser": "^8.54.0",
+    "bun-types": "^1.2.4",
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.5",
+    "prettier": "^3.8.1"
+  }
+}
