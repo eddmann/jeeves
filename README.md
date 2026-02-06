@@ -53,7 +53,7 @@ You (Telegram) → grammY → Agent Loop → Claude + Tools → Reply
 
 The agent loop calls Claude with conversation history and five tools (`bash`, `read`, `write`, `webfetch`, `cron`). Claude calls tools, results feed back — up to 25 iterations per message. A heartbeat system checks in periodically, and a cron scheduler handles timed jobs.
 
-For the full system design, see [docs/architecture.md](docs/architecture.md).
+For the full system design, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Workspace
 
