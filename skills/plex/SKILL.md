@@ -21,9 +21,9 @@ echo 'PLEX_SERVER_URL=http://their-server:32400' >> .env
 
 ### Authentication
 
-Plex uses OAuth with a PIN-based flow — no callback URL needed. Generate an auth link, send it to the user, then poll until they sign in.
+Plex uses OAuth with a PIN-based flow. This MUST be done in two separate steps because you need to show the user the link and wait for them to click it before polling.
 
-**Step 1: Generate auth URL and PIN ID**
+**Step 1: Generate auth URL and save state**
 
 ```bash
 set -a; source .env 2>/dev/null; set +a; uv run - <<'EOF'
@@ -31,58 +31,97 @@ set -a; source .env 2>/dev/null; set +a; uv run - <<'EOF'
 # requires-python = ">=3.11"
 # dependencies = ["plexapi>=4.18"]
 # ///
+import json
+from pathlib import Path
 from plexapi.myplex import MyPlexPinLogin
 
 pinlogin = MyPlexPinLogin(oauth=True)
+code = pinlogin._getCode()
+pin_id = pinlogin._id
+client_id = pinlogin._headers()['X-Plex-Client-Identifier']
+
+# Save state for step 2
+Path("plex-oauth-state.json").write_text(json.dumps({
+    "pin_id": pin_id,
+    "code": code,
+    "client_id": client_id,
+}))
+
 print(f"URL: {pinlogin.oauthUrl()}")
-print(f"PIN: {pinlogin.pin}")
 EOF
 ```
 
-Send the URL to the user as a clickable link and tell them to sign in.
+Send the URL to the user as a clickable markdown link. Tell them to sign in and let you know when done.
+The PIN is valid for ~15 minutes so there's no rush.
 
-**Step 2: Poll for completion** (run after user says they've signed in)
+**IMPORTANT:** Do NOT call `pinlogin.run()` or `pinlogin.waitForLogin()` — these start a blocking polling thread that will timeout before the user can click the link. Instead, manually call `_getCode()` and save the state.
+
+**Step 2: Poll for token** (run ONLY after user confirms they've signed in)
 
 ```bash
-set -a; source .env 2>/dev/null; set +a; uv run - PIN_ID_HERE <<'EOF'
+export PLEX_SERVER_URL=$(grep PLEX_SERVER_URL .env | cut -d= -f2); uv run - <<'EOF'
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["plexapi>=4.18"]
+# dependencies = ["plexapi>=4.18", "requests"]
 # ///
-import json, os, sys
+import json, os, requests, time, xml.etree.ElementTree as ET
 from pathlib import Path
-from plexapi.myplex import MyPlexPinLogin, MyPlexAccount
 from plexapi.server import PlexServer
+from plexapi.myplex import MyPlexAccount
 
-pinlogin = MyPlexPinLogin(oauth=True)
-pinlogin._pin = {"id": int(sys.argv[1]), "code": pinlogin._code}
-pinlogin.run(timeout=5)
-pinlogin.waitForLogin()
+state = json.loads(Path("plex-oauth-state.json").read_text())
 
-if not pinlogin.token:
-    print("ERROR: Auth not completed — ask user to click the link and sign in")
-    exit(1)
+headers = {
+    "Accept": "application/xml",
+    "X-Plex-Client-Identifier": state["client_id"],
+    "X-Plex-Product": "PlexAPI",
+}
 
-server_url = os.environ["PLEX_SERVER_URL"]
-plex = PlexServer(server_url, pinlogin.token)
+# Poll with backoff to avoid rate limiting (429)
+for i in range(15):
+    resp = requests.get(
+        f"https://plex.tv/api/v2/pins/{state['pin_id']}",
+        headers=headers, timeout=10
+    )
+    if resp.status_code == 429:
+        time.sleep(5)
+        continue
+    if resp.status_code == 200:
+        root = ET.fromstring(resp.text)
+        token = root.attrib.get('authToken', '')
+        if token:
+            server_url = os.environ["PLEX_SERVER_URL"]
+            plex = PlexServer(server_url, token)
+            Path("plex-token.json").write_text(json.dumps({
+                "token": token,
+                "server_url": server_url
+            }, indent=2))
+            Path("plex-token.json").chmod(0o600)
+            account = MyPlexAccount(token=token)
+            print(f"SUCCESS: Connected as {account.username}")
+            print(f"Server: {plex.friendlyName}")
+            for section in plex.library.sections():
+                print(f"  - {section.title} ({section.type})")
+            exit(0)
+    time.sleep(3)
 
-Path("plex-token.json").write_text(json.dumps({
-    "token": pinlogin.token,
-    "server_url": server_url
-}, indent=2))
-Path("plex-token.json").chmod(0o600)
-
-print(f"SUCCESS: Connected as {MyPlexAccount(token=pinlogin.token).username}")
-print(f"Server: {plex.friendlyName}")
-for section in plex.library.sections():
-    print(f"  - {section.title} ({section.type})")
+print("ERROR: No token received. Ask user to try signing in again.")
+exit(1)
 EOF
 ```
+
+**Key details about the OAuth flow:**
+- `MyPlexPinLogin.run()` generates a NEW pin and starts a blocking thread — don't use it for two-step auth
+- `MyPlexPinLogin.pin` raises `BadRequest` when `oauth=True` — don't access it
+- Use `_getCode()` to generate the PIN without starting the polling thread
+- Save `_id` (pin ID), `_code`, and the client identifier to a file between steps
+- In step 2, poll the Plex API directly with `requests` using the saved pin ID
+- Plex rate limits aggressively — poll every 3s, back off on 429s
 
 **Alternative: direct token auth.** If the user already has a Plex token, skip OAuth and store it directly:
 
 ```bash
-set -a; source .env 2>/dev/null; set +a; uv run - <<'EOF'
+export PLEX_SERVER_URL=$(grep PLEX_SERVER_URL .env | cut -d= -f2); uv run - <<'EOF'
 # /// script
 # requires-python = ">=3.11"
 # dependencies = ["plexapi>=4.18"]
@@ -108,12 +147,12 @@ for section in plex.library.sections():
 EOF
 ```
 
-For the direct token approach, append `PLEX_TOKEN` to `.env` first.
+For the direct token approach, the user can find their token by opening any media item in the Plex web UI → Get Info → View XML → copy `X-Plex-Token` from the URL.
 
 ## Query Template
 
 ```bash
-set -a; source .env 2>/dev/null; set +a; uv run - <<'EOF'
+export PLEX_SERVER_URL=$(grep PLEX_SERVER_URL .env | cut -d= -f2); uv run - <<'EOF'
 # /// script
 # requires-python = ">=3.11"
 # dependencies = ["plexapi>=4.18"]
@@ -282,3 +321,4 @@ For full library docs: `webfetch https://github.com/pkkid/python-plexapi`
 - **"Unauthorized"**: Token revoked, re-run OAuth
 - **Section not found**: Use exact section title (case-sensitive), check `plex.library.sections()`
 - **Empty results**: Some methods return generators; convert with `list()` if needed
+- **Rate limited (429)**: Plex API rate limits aggressively. Back off and retry. Avoid rapid repeated OAuth attempts.
