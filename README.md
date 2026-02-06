@@ -14,7 +14,11 @@ Inspired by [OpenClaw](https://openclaw.ai/), I wanted to peel back what was und
 
 ## Quick Start
 
+Clone the repo — the agent can read its own source, understand how it's built, and modify itself. Very meta.
+
 ```bash
+git clone https://github.com/eddmann/jeeves.git
+cd jeeves
 make deps                  # install dependencies
 make login                 # OAuth via Claude Pro/Max
 # or: make login/key       # API key login
