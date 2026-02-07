@@ -195,6 +195,20 @@ else
   success "API key accepted"
 fi
 
+# Tailscale
+echo
+read -rp "  ${BOLD}? Configure Tailscale? [y/N]:${RESET} " SETUP_TAILSCALE
+TS_AUTHKEY=""
+if [[ "${SETUP_TAILSCALE,,}" == "y" ]]; then
+  echo "  Get a reusable auth key from: https://login.tailscale.com/admin/settings/keys"
+  while true; do
+    prompt_secret TS_AUTHKEY "Tailscale Auth Key"
+    [[ -n "$TS_AUTHKEY" ]] && break
+    error "Auth key cannot be empty"
+  done
+  success "Tailscale will be configured"
+fi
+
 echo
 success "Configuration complete"
 
@@ -352,6 +366,9 @@ CLEANUP_FILES+=("$ENV_FILE")
   if [[ "$AUTH_METHOD" == "apikey" ]]; then
     echo "ANTHROPIC_API_KEY=$API_KEY"
   fi
+  if [[ -n "$TS_AUTHKEY" ]]; then
+    echo "TS_AUTHKEY=$TS_AUTHKEY"
+  fi
 } > "$ENV_FILE"
 
 # Generate user-data with hostname + SSH user
@@ -392,6 +409,20 @@ cp "$SCRIPT_DIR/docker-compose.yml" "$COMPOSE_FILE"
 
 if [[ "$AUTH_METHOD" == "oauth" ]]; then
   sed -i.bak 's|# - ./auth.json:/app/auth.json|- ./auth.json:/app/auth.json|' "$COMPOSE_FILE"
+  rm -f "${COMPOSE_FILE}.bak"
+fi
+
+if [[ -n "$TS_AUTHKEY" ]]; then
+  # Uncomment all Tailscale lines (remove "# " prefix from tailscale-related comments)
+  sed -i.bak \
+    -e '/Uncomment for Tailscale/d' \
+    -e 's|^    # network_mode: service:tailscale|    network_mode: service:tailscale|' \
+    -e 's|^    # depends_on:|    depends_on:|' \
+    -e 's|^    #   - tailscale|      - tailscale|' \
+    -e 's|^  # tailscale:|  tailscale:|' \
+    -e 's|^  #   |    |' \
+    -e 's|^  # tailscale-state:|  tailscale-state:|' \
+    "$COMPOSE_FILE"
   rm -f "${COMPOSE_FILE}.bak"
 fi
 

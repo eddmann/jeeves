@@ -70,6 +70,18 @@ Insert the SD card and power on. Cloud-init will:
 
 First boot takes a few minutes. Jeeves will be running once cloud-init completes.
 
+## Tailscale (Optional)
+
+The setup script can configure a [Tailscale](https://tailscale.com/) sidecar for SSH access to the Jeeves container from any device on your tailnet. When prompted, provide a reusable auth key from the [Tailscale admin console](https://login.tailscale.com/admin/settings/keys).
+
+For manual setup, uncomment the Tailscale blocks in `docker-compose.yml` and add `TS_AUTHKEY` to your `env` file.
+
+Once running, SSH in with:
+
+```bash
+ssh jeeves  # from any device on your tailnet
+```
+
 ## How updates work
 
 [Watchtower](https://containrrr.dev/watchtower/) polls GHCR every 5 minutes. When a new image is pushed (on every commit to main), Watchtower pulls it and restarts Jeeves automatically. Zero-touch updates.
