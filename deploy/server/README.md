@@ -44,7 +44,7 @@ docker compose up -d
 
 ## Tailscale (Optional)
 
-The setup script can configure a [Tailscale](https://tailscale.com/) sidecar for SSH access to the Jeeves container from any device on your tailnet. You'll need a reusable auth key from the [Tailscale admin console](https://login.tailscale.com/admin/settings/keys).
+Tailscale is built into the Jeeves Docker image and activates when `TS_AUTHKEY` is set. The setup script will prompt for this. You'll need a reusable auth key from the [Tailscale admin console](https://login.tailscale.com/admin/settings/keys).
 
 Once configured, SSH in with:
 

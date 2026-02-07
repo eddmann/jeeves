@@ -217,49 +217,27 @@ if [[ "$AUTH_METHOD" == "oauth" ]]; then
 fi
 
 # Generate docker-compose.yml
-if [[ -n "$TS_AUTHKEY" ]]; then
-  # With Tailscale sidecar
-  cat > "$INSTALL_DIR/docker-compose.yml" <<'COMPOSE_EOF'
+cat > "$INSTALL_DIR/docker-compose.yml" <<'COMPOSE_EOF'
 version: '3'
 services:
-  tailscale:
-    image: tailscale/tailscale:latest
-    container_name: jeeves-tailscale
-    hostname: jeeves
-    restart: unless-stopped
-    environment:
-      - TS_AUTHKEY=${TS_AUTHKEY}
-      - TS_STATE_DIR=/var/lib/tailscale
-      - TS_USERSPACE=true
-      - TS_EXTRA_ARGS=--ssh
-    cap_add:
-      - net_admin
-      - sys_module
-    volumes:
-      - tailscale-state:/var/lib/tailscale
-    devices:
-      - /dev/net/tun:/dev/net/tun
-
   jeeves:
     image: ghcr.io/eddmann/jeeves:latest
     container_name: jeeves
     restart: unless-stopped
-    network_mode: service:tailscale
-    depends_on:
-      - tailscale
     env_file: .env
     volumes:
       - workspace:/app/workspace
+      - tailscale-state:/var/lib/tailscale
 COMPOSE_EOF
 
-  # Add auth.json mount if OAuth
-  if [[ "$AUTH_METHOD" == "oauth" ]]; then
-    sed -i.bak '/- workspace:\/app\/workspace/a\
+# Add auth.json mount if OAuth
+if [[ "$AUTH_METHOD" == "oauth" ]]; then
+  sed -i.bak '/- workspace:\/app\/workspace/a\
       - ./auth.json:/app/auth.json' "$INSTALL_DIR/docker-compose.yml"
-    rm -f "$INSTALL_DIR/docker-compose.yml.bak"
-  fi
+  rm -f "$INSTALL_DIR/docker-compose.yml.bak"
+fi
 
-  cat >> "$INSTALL_DIR/docker-compose.yml" <<'COMPOSE_EOF'
+cat >> "$INSTALL_DIR/docker-compose.yml" <<'COMPOSE_EOF'
 
   watchtower:
     image: containrrr/watchtower
@@ -278,47 +256,6 @@ volumes:
   workspace:
   tailscale-state:
 COMPOSE_EOF
-
-else
-  # Without Tailscale
-  cat > "$INSTALL_DIR/docker-compose.yml" <<'COMPOSE_EOF'
-version: '3'
-services:
-  jeeves:
-    image: ghcr.io/eddmann/jeeves:latest
-    container_name: jeeves
-    restart: unless-stopped
-    env_file: .env
-    volumes:
-      - workspace:/app/workspace
-COMPOSE_EOF
-
-  # Add auth.json mount if OAuth
-  if [[ "$AUTH_METHOD" == "oauth" ]]; then
-    sed -i.bak '/- workspace:\/app\/workspace/a\
-      - ./auth.json:/app/auth.json' "$INSTALL_DIR/docker-compose.yml"
-    rm -f "$INSTALL_DIR/docker-compose.yml.bak"
-  fi
-
-  cat >> "$INSTALL_DIR/docker-compose.yml" <<'COMPOSE_EOF'
-
-  watchtower:
-    image: containrrr/watchtower
-    container_name: watchtower
-    restart: unless-stopped
-    environment:
-      - WATCHTOWER_CLEANUP=true
-      - WATCHTOWER_POLL_INTERVAL=300
-      - WATCHTOWER_SCOPE=jeeves
-    labels:
-      - com.centurylinklabs.watchtower.scope=jeeves
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-
-volumes:
-  workspace:
-COMPOSE_EOF
-fi
 
 success "Generated docker-compose.yml"
 

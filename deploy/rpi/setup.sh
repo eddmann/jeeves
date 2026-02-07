@@ -412,20 +412,6 @@ if [[ "$AUTH_METHOD" == "oauth" ]]; then
   rm -f "${COMPOSE_FILE}.bak"
 fi
 
-if [[ -n "$TS_AUTHKEY" ]]; then
-  # Uncomment all Tailscale lines (remove "# " prefix from tailscale-related comments)
-  sed -i.bak \
-    -e '/Uncomment for Tailscale/d' \
-    -e 's|^    # network_mode: service:tailscale|    network_mode: service:tailscale|' \
-    -e 's|^    # depends_on:|    depends_on:|' \
-    -e 's|^    #   - tailscale|      - tailscale|' \
-    -e 's|^  # tailscale:|  tailscale:|' \
-    -e 's|^  #   |    |' \
-    -e 's|^  # tailscale-state:|  tailscale-state:|' \
-    "$COMPOSE_FILE"
-  rm -f "${COMPOSE_FILE}.bak"
-fi
-
 # Copy files
 sudo cp "$COMPOSE_FILE" "$BOOT_MOUNT/docker-compose.yml"
 success "Copied docker-compose.yml"

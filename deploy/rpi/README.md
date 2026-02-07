@@ -72,9 +72,7 @@ First boot takes a few minutes. Jeeves will be running once cloud-init completes
 
 ## Tailscale (Optional)
 
-The setup script can configure a [Tailscale](https://tailscale.com/) sidecar for SSH access to the Jeeves container from any device on your tailnet. When prompted, provide a reusable auth key from the [Tailscale admin console](https://login.tailscale.com/admin/settings/keys).
-
-For manual setup, uncomment the Tailscale blocks in `docker-compose.yml` and add `TS_AUTHKEY` to your `env` file.
+Tailscale is built into the Jeeves Docker image and activates when `TS_AUTHKEY` is set. The setup script will prompt for this. For manual setup, add `TS_AUTHKEY` to your `env` file with a reusable auth key from the [Tailscale admin console](https://login.tailscale.com/admin/settings/keys).
 
 Once running, SSH in with:
 

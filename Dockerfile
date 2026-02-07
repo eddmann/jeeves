@@ -34,6 +34,14 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
   && apt-get update && apt-get install -y --no-install-recommends gh \
   && rm -rf /var/lib/apt/lists/*
 
+# Tailscale (optional — activated when TS_AUTHKEY is set)
+RUN curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg \
+    > /usr/share/keyrings/tailscale-archive-keyring.gpg \
+  && curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.tailscale-keyring.list \
+    > /etc/apt/sources.list.d/tailscale.list \
+  && apt-get update && apt-get install -y --no-install-recommends tailscale \
+  && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # ---- deps: install node dependencies ----
@@ -50,9 +58,11 @@ COPY package.json bun.lock tsconfig.json ./
 COPY src/ ./src/
 COPY skills/ ./skills/
 COPY Makefile ./
+COPY entrypoint.sh ./
 
-RUN make build
+RUN make build && chmod +x entrypoint.sh
 
+ENTRYPOINT ["./entrypoint.sh"]
 CMD ["make", "run"]
 
 # ---- dev: development target ----
