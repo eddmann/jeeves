@@ -220,6 +220,7 @@ fi
 if [[ -n "$TS_AUTHKEY" ]]; then
   # With Tailscale sidecar
   cat > "$INSTALL_DIR/docker-compose.yml" <<'COMPOSE_EOF'
+version: '3'
 services:
   tailscale:
     image: tailscale/tailscale:latest
@@ -280,6 +281,7 @@ COMPOSE_EOF
 else
   # Without Tailscale
   cat > "$INSTALL_DIR/docker-compose.yml" <<'COMPOSE_EOF'
+version: '3'
 services:
   jeeves:
     image: ghcr.io/eddmann/jeeves:latest
