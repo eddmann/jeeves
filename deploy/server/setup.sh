@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ─── Colors ────────────────────────────────────────────────────────────────────
 
-if [[ -t 1 ]] && command -v tput &>/dev/null; then
+if [[ -e /dev/tty ]] && command -v tput &>/dev/null; then
   BOLD=$(tput bold)
   DIM=$(tput dim)
   GREEN=$(tput setaf 2)
@@ -25,14 +25,14 @@ success() { echo "${GREEN}✔  $*${RESET}"; }
 prompt() {
   local var="$1" label="$2"
   local value
-  read -rp "  ${BOLD}? ${label}:${RESET} " value
+  read -rp "  ${BOLD}? ${label}:${RESET} " value < /dev/tty
   eval "$var=\$value"
 }
 
 prompt_secret() {
   local var="$1" label="$2"
   local value
-  read -rsp "  ${BOLD}? ${label}:${RESET} " value
+  read -rsp "  ${BOLD}? ${label}:${RESET} " value < /dev/tty
   echo
   eval "$var=\$value"
 }
@@ -100,7 +100,7 @@ echo
 echo "  ${BOLD}? Auth method:${RESET}"
 echo "    1) API key"
 echo "    2) OAuth (auth.json)"
-read -rp "  ${BOLD}  Choose [1/2]:${RESET} " AUTH_CHOICE
+read -rp "  ${BOLD}  Choose [1/2]:${RESET} " AUTH_CHOICE < /dev/tty
 echo
 
 AUTH_METHOD="apikey"
@@ -121,7 +121,7 @@ if [[ "$AUTH_CHOICE" == "2" ]]; then
 
   if [[ -n "$AUTH_JSON_FOUND" ]]; then
     echo "  Found auth.json at: ${BOLD}$AUTH_JSON_FOUND${RESET}"
-    read -rp "  ${BOLD}? Use this file? [Y/n]:${RESET} " USE_FOUND
+    read -rp "  ${BOLD}? Use this file? [Y/n]:${RESET} " USE_FOUND < /dev/tty
     if [[ "${USE_FOUND,,}" != "n" ]]; then
       AUTH_JSON_PATH="$AUTH_JSON_FOUND"
     fi
@@ -161,7 +161,7 @@ fi
 
 # Tailscale
 echo
-read -rp "  ${BOLD}? Configure Tailscale? [y/N]:${RESET} " SETUP_TAILSCALE
+read -rp "  ${BOLD}? Configure Tailscale? [y/N]:${RESET} " SETUP_TAILSCALE < /dev/tty
 TS_AUTHKEY=""
 if [[ "${SETUP_TAILSCALE,,}" == "y" ]]; then
   echo "  Get a reusable auth key from: https://login.tailscale.com/admin/settings/keys"
@@ -175,7 +175,7 @@ fi
 
 # Install directory
 echo
-read -rp "  ${BOLD}? Install directory [/opt/jeeves]:${RESET} " INSTALL_DIR
+read -rp "  ${BOLD}? Install directory [/opt/jeeves]:${RESET} " INSTALL_DIR < /dev/tty
 INSTALL_DIR="${INSTALL_DIR:-/opt/jeeves}"
 
 echo
