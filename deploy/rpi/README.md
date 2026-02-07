@@ -79,7 +79,7 @@ For manual setup, uncomment the Tailscale blocks in `docker-compose.yml` and add
 Once running, SSH in with:
 
 ```bash
-ssh jeeves  # from any device on your tailnet
+ssh root@jeeves  # from any device on your tailnet
 ```
 
 ## How updates work

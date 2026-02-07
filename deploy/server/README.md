@@ -49,7 +49,7 @@ The setup script can configure a [Tailscale](https://tailscale.com/) sidecar for
 Once configured, SSH in with:
 
 ```bash
-ssh jeeves  # from any device on your tailnet
+ssh root@jeeves  # from any device on your tailnet
 ```
 
 ## Monitoring

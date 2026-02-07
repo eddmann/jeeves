@@ -230,6 +230,7 @@ services:
     environment:
       - TS_AUTHKEY=${TS_AUTHKEY}
       - TS_STATE_DIR=/var/lib/tailscale
+      - TS_USERSPACE=true
       - TS_EXTRA_ARGS=--ssh
     cap_add:
       - net_admin
@@ -347,6 +348,6 @@ echo "    ${DIM}Auto-updates every 5 minutes from GHCR${RESET}"
 if [[ -n "$TS_AUTHKEY" ]]; then
   echo
   echo "  ${BOLD}Tailscale:${RESET}"
-  echo "    ${DIM}ssh jeeves  # from any device on your tailnet${RESET}"
+  echo "    ${DIM}ssh root@jeeves  # from any device on your tailnet${RESET}"
 fi
 echo
