@@ -1,10 +1,6 @@
-<p align="center">
-  <img src="docs/logo.png" alt="Jeeves" width="200">
-</p>
+# Jeeves
 
-<h3 align="center"><em>Just ask Jeeves...</em></h3>
-
----
+![Jeeves](docs/header.png)
 
 A personal AI assistant that lives in Telegram. You send a message, Claude figures out what to do — run commands, read/write files, fetch web pages, schedule tasks — and replies. Conversations persist across restarts. The agent can extend itself by writing new skills and updating its own memory.
 
