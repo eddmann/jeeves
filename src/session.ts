@@ -7,7 +7,15 @@
  * numbered file is created. Original messages are preserved for indexing.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "fs";
 import { join } from "path";
 import type { LLMMessage } from "./llm";
 import { log } from "./logger";

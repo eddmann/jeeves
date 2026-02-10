@@ -31,6 +31,7 @@
     "linkedom": "^0.18.12",
     "openai": "^6.18.0",
     "proper-lockfile": "^4.1.2",
+    "sqlite-vec": "^0.1.7-alpha.2",
     "yaml": "^2.8.2"
   },
   "devDependencies": {

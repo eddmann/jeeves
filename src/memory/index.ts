@@ -7,11 +7,26 @@ import { Database } from "bun:sqlite";
 import { existsSync, readFileSync, readdirSync, mkdirSync } from "fs";
 import { join } from "path";
 import { createHash } from "crypto";
+import * as sqliteVec from "sqlite-vec";
 import type { EmbedFn } from "./embeddings";
 import type { SearchHit } from "./hybrid";
 import { cosineSimilarity, buildFtsQuery, bm25RankToScore, mergeHybridResults } from "./hybrid";
 import { log } from "../logger";
 import type { LLMMessage } from "../llm";
+
+let customSqliteSet = false;
+
+/** Try to set Homebrew SQLite on macOS (required for extension loading). */
+function ensureCustomSqlite(): void {
+  if (customSqliteSet) return;
+  customSqliteSet = true;
+  if (process.platform !== "darwin") return;
+  try {
+    Database.setCustomSQLite("/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib");
+  } catch {
+    // Homebrew SQLite not available — extensions won't load
+  }
+}
 
 const CHUNK_SIZE_CHARS = 1600; // ~400 tokens
 const CHUNK_OVERLAP_CHARS = 320; // ~80 tokens
@@ -27,6 +42,7 @@ export interface MemorySearchResult {
 export class MemoryIndex {
   private db: Database;
   private workspaceDir: string;
+  private hasVec: boolean;
 
   constructor(
     dbPath: string,
@@ -39,8 +55,19 @@ export class MemoryIndex {
     const dbDir = dbPath.substring(0, dbPath.lastIndexOf("/"));
     if (dbDir) mkdirSync(dbDir, { recursive: true });
 
+    ensureCustomSqlite();
     this.db = new Database(dbPath, { create: true });
     this.db.exec("PRAGMA journal_mode = WAL");
+
+    // Try to load sqlite-vec extension
+    this.hasVec = false;
+    try {
+      sqliteVec.load(this.db);
+      this.hasVec = true;
+    } catch {
+      log.debug("memory-index", "sqlite-vec not available, using JS fallback for vector search");
+    }
+
     this.initSchema();
   }
 
@@ -205,7 +232,7 @@ export class MemoryIndex {
     try {
       const queryEmbedding = (await this.embedFn([query]))[0];
       if (queryEmbedding) {
-        vectorHits = this.vectorSearch(queryEmbedding, maxResults * 2);
+        vectorHits = this.vectorSearch(queryEmbedding, maxResults * 4);
       }
     } catch (err) {
       log.warn("memory-index", "Vector search failed", {
@@ -214,7 +241,7 @@ export class MemoryIndex {
     }
 
     // FTS5 keyword search
-    const keywordHits = this.keywordSearch(query, maxResults * 2);
+    const keywordHits = this.keywordSearch(query, maxResults * 4);
 
     // Merge results
     const merged = mergeHybridResults(vectorHits, keywordHits, { maxResults });
@@ -229,6 +256,43 @@ export class MemoryIndex {
   }
 
   private vectorSearch(queryEmbedding: number[], limit: number): SearchHit[] {
+    if (this.hasVec) {
+      return this.vectorSearchNative(queryEmbedding, limit);
+    }
+    return this.vectorSearchJS(queryEmbedding, limit);
+  }
+
+  private vectorSearchNative(queryEmbedding: number[], limit: number): SearchHit[] {
+    const queryJson = JSON.stringify(queryEmbedding);
+    const rows = this.db
+      .prepare(
+        `SELECT id, file_path, start_line, end_line, text,
+                vec_distance_cosine(embedding, ?) AS distance
+         FROM chunks
+         WHERE embedding IS NOT NULL
+         ORDER BY distance
+         LIMIT ?`,
+      )
+      .all(queryJson, limit) as Array<{
+      id: number;
+      file_path: string;
+      start_line: number;
+      end_line: number;
+      text: string;
+      distance: number;
+    }>;
+
+    return rows.map((row) => ({
+      chunkId: row.id,
+      filePath: row.file_path,
+      startLine: row.start_line,
+      endLine: row.end_line,
+      text: row.text,
+      score: 1 - row.distance,
+    }));
+  }
+
+  private vectorSearchJS(queryEmbedding: number[], limit: number): SearchHit[] {
     const rows = this.db
       .prepare(
         "SELECT id, file_path, start_line, end_line, text, embedding FROM chunks WHERE embedding IS NOT NULL",
