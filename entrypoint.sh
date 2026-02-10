@@ -9,7 +9,7 @@ if [ -n "$TS_AUTHKEY" ]; then
     if tailscale status >/dev/null 2>&1; then break; fi
     sleep 0.5
   done
-  tailscale up --authkey="$TS_AUTHKEY" --hostname="${TS_HOSTNAME:-jeeves}" --ssh --reset
+  tailscale up --authkey="$TS_AUTHKEY" --hostname="${TS_HOSTNAME:-jeeves}" --ssh --reset || echo "Warning: tailscale up failed (non-fatal)"
 fi
 
 exec "$@"
