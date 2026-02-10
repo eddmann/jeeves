@@ -93,4 +93,29 @@ describe("web fetch tool", () => {
     const headers = capturedHeaders as Record<string, string>;
     expect(headers["User-Agent"]).toContain("Mozilla/5.0");
   });
+
+  test("passes AbortSignal to fetch for timeout", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    globalThis.fetch = async (_url: string | URL | Request, init?: RequestInit) => {
+      capturedSignal = init?.signal ?? undefined;
+      return new Response("ok", { headers: { "content-type": "text/plain" } });
+    };
+    await webFetchTool.execute({ url: "https://example.com" });
+    expect(capturedSignal).toBeDefined();
+    expect(capturedSignal!.aborted).toBe(false);
+  });
+
+  test("fetch timeout produces error string instead of hanging", async () => {
+    globalThis.fetch = async (_url: string | URL | Request, init?: RequestInit) => {
+      // Simulate an abort by immediately aborting via the signal
+      if (init?.signal) {
+        const err = new DOMException("The operation was aborted", "TimeoutError");
+        throw err;
+      }
+      throw new Error("unexpected");
+    };
+    const result = await webFetchTool.execute({ url: "https://example.com" });
+    expect(result).toContain("Error fetching URL:");
+    expect(result).toContain("aborted");
+  });
 });

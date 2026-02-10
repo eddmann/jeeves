@@ -17,15 +17,7 @@ import { createTelegramChannel } from "./channel/telegram";
 import { initLogger, log } from "./logger";
 import { MemoryIndex } from "./memory/index";
 import { createOpenAIEmbedder, createNoOpEmbedder } from "./memory/embeddings";
-
-// Agent mutex — prevents overlapping runs
-let agentLock = Promise.resolve();
-function withAgentLock<T>(fn: () => Promise<T>): Promise<T> {
-  const prev = agentLock;
-  let resolve!: () => void;
-  agentLock = new Promise((r) => (resolve = r));
-  return prev.then(fn).finally(() => resolve());
-}
+import { withAgentLock } from "./agent-lock";
 
 async function main() {
   const args = process.argv.slice(2);

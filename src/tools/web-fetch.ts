@@ -40,6 +40,7 @@ export const webFetchTool: Tool = {
           "Upgrade-Insecure-Requests": "1",
         },
         redirect: "follow",
+        signal: AbortSignal.timeout(15_000),
       });
 
       if (!response.ok) {

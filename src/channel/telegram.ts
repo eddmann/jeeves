@@ -91,9 +91,14 @@ export function createTelegramChannel(opts: {
     const prev = chatLocks.get(chatId) ?? Promise.resolve();
     const next = prev.then(fn, fn);
     chatLocks.set(chatId, next);
-    next.then(() => {
-      if (chatLocks.get(chatId) === next) chatLocks.delete(chatId);
-    });
+    next.then(
+      () => {
+        if (chatLocks.get(chatId) === next) chatLocks.delete(chatId);
+      },
+      () => {
+        if (chatLocks.get(chatId) === next) chatLocks.delete(chatId);
+      },
+    );
     return next;
   }
 
@@ -113,12 +118,15 @@ export function createTelegramChannel(opts: {
     }
   }
 
-  bot.on("message:text", (ctx) => {
+  bot.on("message:text", async (ctx) => {
     const chatId = ctx.chat.id.toString();
     const text = ctx.message.text;
     log.info("telegram", "Message received", { chatId, preview: text.slice(0, 100) });
 
-    withChatLock(chatId, async () => {
+    // Acknowledge receipt immediately (before any locks)
+    await ctx.react("👀").catch(() => {});
+
+    return withChatLock(chatId, async () => {
       // Send typing indicator
       await ctx.replyWithChatAction("typing");
       const typingInterval = setInterval(() => {

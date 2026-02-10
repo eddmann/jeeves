@@ -45,7 +45,7 @@ describe("bash tool", () => {
 
   test("timeout returns error/exit code", async () => {
     const result = await tool.execute({ command: "sleep 10", timeout: 100 });
-    // Bun.spawnSync with exceeded timeout returns non-zero exit code
+    // Bun.spawn with exceeded timeout returns non-zero exit code
     expect(result).toMatch(/\[exit code|Error/);
   });
 });

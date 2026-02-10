@@ -28,18 +28,23 @@ export function createBashTool(workspaceDir: string): Tool {
       const timeout = (input.timeout as number) ?? 30000;
 
       try {
-        const proc = Bun.spawnSync(["sh", "-c", command], {
+        const proc = Bun.spawn(["sh", "-c", command], {
           cwd: workspaceDir,
           timeout,
           env: process.env,
+          stderr: "pipe",
         });
 
-        const stdout = proc.stdout?.toString() ?? "";
-        const stderr = proc.stderr?.toString() ?? "";
+        const [stdout, stderr, exitCode] = await Promise.all([
+          new Response(proc.stdout).text(),
+          new Response(proc.stderr).text(),
+          proc.exited,
+        ]);
+
         const output = (stdout + stderr).trim();
 
-        if (proc.exitCode !== 0) {
-          return `[exit code ${proc.exitCode}]\n${output}`;
+        if (exitCode !== 0) {
+          return `[exit code ${exitCode}]\n${output}`;
         }
         return output || "(no output)";
       } catch (err) {

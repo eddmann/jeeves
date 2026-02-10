@@ -25,10 +25,10 @@ export function createOpenAIEmbedder(apiKey: string): EmbedFn {
 
     for (let i = 0; i < texts.length; i += BATCH_SIZE) {
       const batch = texts.slice(i, i + BATCH_SIZE);
-      const response = await client.embeddings.create({
-        model: MODEL,
-        input: batch,
-      });
+      const response = await client.embeddings.create(
+        { model: MODEL, input: batch },
+        { signal: AbortSignal.timeout(10_000) },
+      );
 
       // Sort by index to preserve order
       const sorted = response.data.sort((a, b) => a.index - b.index);

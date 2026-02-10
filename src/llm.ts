@@ -104,6 +104,7 @@ export async function callLLM(opts: {
   });
 
   const llmStart = Date.now();
+  const LLM_TIMEOUT_MS = 2 * 60 * 1000;
 
   // Use streaming (required for OAuth/Claude Code compatibility)
   const stream = client.messages.stream({
@@ -117,8 +118,12 @@ export async function callLLM(opts: {
 
   let response: Anthropic.Message;
   try {
-    response = await stream.finalMessage();
+    const timeout = new Promise<never>((_, rej) =>
+      setTimeout(() => rej(new Error("LLM request timed out")), LLM_TIMEOUT_MS),
+    );
+    response = await Promise.race([stream.finalMessage(), timeout]);
   } catch (err) {
+    stream.abort();
     const status = (err as { status?: number }).status;
     log.error("llm", "API error", { status, message: String(err) });
     throw err;
