@@ -114,7 +114,7 @@ async function main() {
   initLogger(logLevel, logDir);
 
   // Initialize workspace
-  const templateDir = join(import.meta.dir, "workspace", "templates");
+  const templateDir = join(rootDir, "src", "workspace", "templates");
   initWorkspace(workspaceDir, templateDir);
   loadWorkspaceEnv(workspaceDir);
 
