@@ -34,29 +34,26 @@ export function createBashTool(workspaceDir: string): Tool {
           stderr: "pipe",
         });
 
-        // Manual timeout — Bun.spawn's native timeout option is unreliable on Linux
-        let killed = false;
-        const timer = setTimeout(() => {
-          killed = true;
-          proc.kill();
-        }, timeout);
-
-        const [stdout, stderr, exitCode] = await Promise.all([
+        let timer: Timer;
+        const readOutput = Promise.all([
           new Response(proc.stdout).text(),
           new Response(proc.stderr).text(),
           proc.exited,
-        ]);
-        clearTimeout(timer);
+        ]).then(([stdout, stderr, exitCode]): string => {
+          clearTimeout(timer);
+          const output = (stdout + stderr).trim();
+          if (exitCode !== 0) return `[exit code ${exitCode}]\n${output}`;
+          return output || "(no output)";
+        });
 
-        const output = (stdout + stderr).trim();
+        const timeoutPromise = new Promise<string>((resolve) => {
+          timer = setTimeout(() => {
+            proc.kill();
+            resolve(`Error: command timed out after ${timeout}ms`);
+          }, timeout);
+        });
 
-        if (killed) {
-          return `[exit code ${exitCode}] (timeout after ${timeout}ms)\n${output}`.trim();
-        }
-        if (exitCode !== 0) {
-          return `[exit code ${exitCode}]\n${output}`;
-        }
-        return output || "(no output)";
+        return await Promise.race([readOutput, timeoutPromise]);
       } catch (err) {
         return `Error: ${err instanceof Error ? err.message : String(err)}`;
       }

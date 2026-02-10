@@ -45,7 +45,6 @@ describe("bash tool", () => {
 
   test("timeout returns error/exit code", async () => {
     const result = await tool.execute({ command: "sleep 10", timeout: 1000 });
-    expect(result).toContain("[exit code");
-    expect(result).toContain("timeout");
+    expect(result).toContain("timed out");
   });
 });
