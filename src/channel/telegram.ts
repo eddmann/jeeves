@@ -123,8 +123,10 @@ export function createTelegramChannel(opts: {
     const text = ctx.message.text;
     log.info("telegram", "Message received", { chatId, preview: text.slice(0, 100) });
 
-    // Acknowledge receipt immediately (before any locks)
-    await ctx.react("👀").catch(() => {});
+    // Acknowledge receipt if the agent is already busy on this chat
+    if (chatLocks.has(chatId)) {
+      await ctx.react("👀").catch(() => {});
+    }
 
     return withChatLock(chatId, async () => {
       // Send typing indicator
