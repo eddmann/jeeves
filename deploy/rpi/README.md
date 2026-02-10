@@ -4,12 +4,12 @@ Run Jeeves on a Raspberry Pi with automatic updates. Flash an SD card, boot, and
 
 ## Requirements
 
-| Item                                                         | Notes                                       |
-| ------------------------------------------------------------ | ------------------------------------------- |
-| Raspberry Pi 3B+, 4, or 5                                    | 64-bit OS required (`arm64`)                |
-| MicroSD card                                                 | 8 GB+                                       |
+| Item                                                         | Notes                                              |
+| ------------------------------------------------------------ | -------------------------------------------------- |
+| Raspberry Pi 3B+, 4, or 5                                    | 64-bit OS required (`arm64`)                       |
+| MicroSD card                                                 | 8 GB+                                              |
 | [Raspberry Pi Imager](https://www.raspberrypi.com/software/) | For manual flash only (not needed with `setup.sh`) |
-| Network                                                      | Ethernet or Wi-Fi (configured during flash) |
+| Network                                                      | Ethernet or Wi-Fi (configured during flash)        |
 
 ## Setup
 
@@ -19,8 +19,7 @@ Run the setup script to flash and configure the SD card in one step:
 
     bash setup.sh
 
-It will prompt for your Telegram and Anthropic credentials, detect your SD card,
-flash Raspberry Pi OS, and copy all deployment files. Then just insert and boot.
+It will prompt for your Telegram and Anthropic credentials, optionally configure Tailscale and an OpenAI API key for semantic memory search, detect your SD card, flash Raspberry Pi OS, and copy all deployment files. Then just insert and boot.
 
 To do it manually instead, follow the steps below.
 
@@ -79,6 +78,10 @@ Once running, SSH in with:
 ```bash
 ssh root@jeeves  # from any device on your tailnet
 ```
+
+## Semantic Memory (Optional)
+
+Setting `OPENAI_API_KEY` in your `env` file enables semantic memory search using OpenAI embeddings (`text-embedding-3-small`). This gives the memory system hybrid search (70% vector + 30% keyword) instead of keyword-only FTS5 search. The setup script will prompt for this.
 
 ## How updates work
 

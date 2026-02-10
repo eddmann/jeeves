@@ -226,6 +226,10 @@ if [[ "${SETUP_TAILSCALE,,}" == "y" ]]; then
   success "Tailscale will be configured"
 fi
 
+# OpenAI (optional — semantic memory search)
+echo
+read -rp "  ${BOLD}? OpenAI API Key (optional, enables semantic memory):${RESET} " OPENAI_KEY < /dev/tty
+
 # Install directory
 echo
 read -rp "  ${BOLD}? Install directory [/opt/jeeves]:${RESET} " INSTALL_DIR < /dev/tty
@@ -257,6 +261,9 @@ fi
   fi
   if [[ -n "$TS_AUTHKEY" ]]; then
     echo "TS_AUTHKEY=$TS_AUTHKEY"
+  fi
+  if [[ -n "$OPENAI_KEY" ]]; then
+    echo "OPENAI_API_KEY=$OPENAI_KEY"
   fi
 } > "$INSTALL_DIR/.env"
 chmod 600 "$INSTALL_DIR/.env"

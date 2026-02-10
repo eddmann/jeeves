@@ -18,8 +18,17 @@ The script will:
 1. Check that Docker and Compose are installed
 2. Prompt for Telegram credentials and auth method (API key or OAuth)
 3. Optionally configure Tailscale for SSH access
-4. Generate all config files in `/opt/jeeves` (or your chosen directory)
-5. Pull images and start the stack
+4. Optionally configure an OpenAI API key for semantic memory search
+5. Generate all config files in `/opt/jeeves` (or your chosen directory)
+6. Pull images and start the stack
+
+### Reinstall
+
+To tear down an existing installation (containers, volumes, images, and files) before setting up fresh:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/eddmann/jeeves/main/deploy/server/setup.sh | bash -s -- --reinstall
+```
 
 ## Manual Setup
 
@@ -51,6 +60,10 @@ Once configured, SSH in with:
 ```bash
 ssh root@jeeves  # from any device on your tailnet
 ```
+
+## Semantic Memory (Optional)
+
+Setting `OPENAI_API_KEY` in `.env` enables semantic memory search using OpenAI embeddings (`text-embedding-3-small`). This gives the memory system hybrid search (70% vector + 30% keyword) instead of keyword-only FTS5 search. The setup script will prompt for this.
 
 ## Monitoring
 
