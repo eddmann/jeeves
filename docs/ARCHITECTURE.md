@@ -13,31 +13,42 @@ Jeeves is a personal AI assistant that lives in Telegram. A user sends a message
 ## System Overview
 
 ```
-┌──────────────────────────────────────────────────────┐
-│                    src/index.ts                       │
-│              (entry point + wiring)                   │
-│                                                      │
-│  ┌──────────┐  ┌───────────┐  ┌──────────────────┐  │
-│  │ Telegram  │  │ Heartbeat │  │  Cron Scheduler  │  │
-│  │ Channel   │  │  Runner   │  │                  │  │
-│  └─────┬─────┘  └─────┬─────┘  └────────┬─────────┘  │
-│        │              │                  │            │
-│        └──────────────┼──────────────────┘            │
-│                       │                               │
-│                 withAgentLock()                        │
-│                       │                               │
-│              ┌────────▼────────┐                      │
-│              │   Agent Loop    │                      │
-│              │  (src/agent.ts) │                      │
-│              └────────┬────────┘                      │
-│                       │                               │
-│         ┌─────────────┼──────────────┐                │
-│         ▼             ▼              ▼                │
-│   ┌──────────┐  ┌──────────┐  ┌───────────┐          │
-│   │   LLM    │  │  Tools   │  │  Session   │          │
-│   │(src/llm) │  │ (5 tools)│  │   Store    │          │
-│   └──────────┘  └──────────┘  └───────────┘          │
-└──────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────┐
+│                      src/index.ts                          │
+│                (entry point + wiring)                       │
+│                                                           │
+│  ┌──────────┐  ┌───────────┐  ┌──────────────────┐       │
+│  │ Telegram  │  │ Heartbeat │  │  Cron Scheduler  │       │
+│  │ Channel   │  │  Runner   │  │                  │       │
+│  └─────┬─────┘  └─────┬─────┘  └────────┬─────────┘       │
+│        │              │                  │                 │
+│        └──────────────┼──────────────────┘                 │
+│                       │                                    │
+│                 withAgentLock()                             │
+│                       │                                    │
+│              ┌────────▼────────┐                           │
+│              │   Agent Loop    │                           │
+│              │  (src/agent.ts) │                           │
+│              └────────┬────────┘                           │
+│                       │                                    │
+│      ┌────────────────┼──────────────────┐                 │
+│      ▼                ▼                  ▼                 │
+│ ┌──────────┐  ┌────────────┐  ┌────────────────────┐      │
+│ │   LLM    │  │   Tools    │  │   Session Store    │      │
+│ │(src/llm) │  │ (6 tools)  │  │  (src/session.ts)  │      │
+│ └──────────┘  └──────┬─────┘  └────────┬───────────┘      │
+│                      │                 │                   │
+│                      ▼                 ▼                   │
+│              ┌─────────────────────────────────┐           │
+│              │        Memory System            │           │
+│              │       (src/memory/)             │           │
+│              │                                 │           │
+│              │  ┌───────────┐  ┌────────────┐  │           │
+│              │  │ Compaction│  │MemoryIndex │  │           │
+│              │  │ (LLM sum) │  │(SQLite+FTS)│  │           │
+│              │  └───────────┘  └────────────┘  │           │
+│              └─────────────────────────────────┘           │
+└───────────────────────────────────────────────────────────┘
 ```
 
 Three triggers feed messages into the agent: Telegram messages from the user, the heartbeat timer, and cron jobs firing. All three go through the **agent mutex** (`withAgentLock`) — only one agent run at a time. This is a deliberate simplification; there's no concurrent access to sessions or workspace files to worry about.
@@ -48,8 +59,9 @@ The `main()` function is the composition root. It:
 
 1. Parses CLI commands (`login`, `login --api-key`, `logout`, `status`)
 2. Initializes the workspace directory structure and loads `.env`
-3. Creates all shared dependencies: `AuthStorage`, `SessionStore`, `CronScheduler`, tools, the Telegram channel, and the `HeartbeatRunner`
-4. Starts everything and registers graceful shutdown handlers
+3. Creates all shared dependencies: `AuthStorage`, `SessionStore`, `CronScheduler`, `MemoryIndex`, tools, the Telegram channel, and the `HeartbeatRunner`
+4. On startup, syncs memory index and indexes existing session files
+5. Starts everything and registers graceful shutdown handlers
 
 The `makeAgentContext()` helper builds an `AgentContext` for each agent run, reloading skills fresh each time (so new skills are picked up without restart).
 
@@ -75,11 +87,12 @@ interface AgentContext {
   workspaceFiles: WorkspaceFile[];
   sessionStore: SessionStore;
   sessionKey: string;
-  callLLM?: typeof callLLM; // injectable for testing
+  memoryIndex: MemoryIndex;
+  callLLM?: typeof callLLM;   // injectable for testing
 }
 ```
 
-The optional `callLLM` field is the **dependency injection seam** — tests inject a stub that returns scripted responses instead of calling the Anthropic API.
+The optional `callLLM` field is the **dependency injection seam** — tests inject a stub that returns scripted responses instead of calling the Anthropic API. `memoryIndex` provides long-term memory search and is synced after compaction.
 
 ## LLM Client (`src/llm.ts`)
 
@@ -96,15 +109,16 @@ The stealth layer (`src/auth/stealth.ts`) handles:
 
 ## Tools
 
-Five tools, all registered via `allTools()` in `src/tools/index.ts`:
+Six tools, all registered via `allTools()` in `src/tools/index.ts`:
 
-| Tool       | File                  | Factory                             | Description                                                                                                                               |
-| ---------- | --------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `bash`     | `tools/bash.ts`       | `createBashTool(workspaceDir)`      | Shell command execution via `Bun.spawnSync`. Commands run in workspace dir with configurable timeout.                                     |
-| `read`     | `tools/read-file.ts`  | `createReadFileTool(workspaceDir)`  | Read file contents with line numbers. Relative paths resolve from workspace.                                                              |
-| `write`    | `tools/write-file.ts` | `createWriteFileTool(workspaceDir)` | Write content to files, creating parent directories as needed.                                                                            |
-| `webfetch` | `tools/web-fetch.ts`  | `webFetchTool` (singleton)          | Fetch URLs, extract readable content using `@mozilla/readability` + `linkedom`. Non-HTML returned raw. Content truncated at 10,000 chars. |
-| `cron`     | `tools/cron.ts`       | `createCronTool(scheduler)`         | Manage scheduled jobs: add/list/remove/run/status.                                                                                        |
+| Tool            | File                      | Factory                                | Description                                                                                                                               |
+| --------------- | ------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `bash`          | `tools/bash.ts`           | `createBashTool(workspaceDir)`         | Shell command execution via `Bun.spawnSync`. Commands run in workspace dir with configurable timeout.                                     |
+| `read`          | `tools/read-file.ts`      | `createReadFileTool(workspaceDir)`     | Read file contents with line numbers. Relative paths resolve from workspace.                                                              |
+| `write`         | `tools/write-file.ts`     | `createWriteFileTool(workspaceDir)`    | Write content to files, creating parent directories as needed.                                                                            |
+| `webfetch`      | `tools/web-fetch.ts`      | `webFetchTool` (singleton)             | Fetch URLs, extract readable content using `@mozilla/readability` + `linkedom`. Non-HTML returned raw. Content truncated at 10,000 chars. |
+| `cron`          | `tools/cron.ts`           | `createCronTool(scheduler)`            | Manage scheduled jobs: add/list/remove/run/status.                                                                                        |
+| `memory_search` | `tools/memory-search.ts`  | `createMemorySearchTool(memoryIndex)`  | Hybrid search over long-term memory files and past session transcripts. Semantic + keyword with `OPENAI_API_KEY`, keyword-only without. |
 
 All tools implement the `Tool` interface:
 
@@ -139,9 +153,122 @@ The OAuth PKCE flow (`src/auth/oauth.ts`) handles initial login against Anthropi
 
 JSONL files in `workspace/sessions/`, keyed by a sanitized identifier (e.g., `telegram_12345`).
 
-- **Max 50 messages** per session, auto-truncated keeping the most recent
-- Truncation skips forward past orphaned `tool_result` messages to maintain a clean conversation boundary
+- **Append-only**: each line is a JSON-serialized `LLMMessage`
 - Session keys are sanitized for filesystem safety (special chars replaced with `_`)
+- No hardcoded message cap — context management is handled by the compaction system (see below)
+
+### Compaction Markers
+
+When context gets too large, the agent writes a **compaction marker** (`{"@@compaction":true}`) followed by compacted messages. On load, `get()` scans backward for the last marker and returns only messages after it. Original messages are preserved above the marker for indexing and auditing.
+
+### File Rotation
+
+When a session file exceeds 1 MB (`ROTATION_SIZE`) after compaction, a new sequentially-numbered file is created (`test.1.jsonl`, `test.2.jsonl`, etc.). The `activePath()` method always resolves to the highest-numbered file. Old files are never modified, preserving a full history archive.
+
+## Memory System (`src/memory/`)
+
+The memory system provides long-term knowledge persistence and retrieval across conversations. It has two complementary parts: **compaction** (context management) and **MemoryIndex** (semantic search).
+
+### Compaction (`src/memory/compaction.ts`)
+
+Token-aware context management that prevents context window overflow while preserving important information.
+
+**Token estimation**: `ceil((chars / 4) * 1.2)` — a character-count heuristic with a 20% safety margin. Handles string messages, text blocks, `tool_use` (includes serialized input), and `tool_result` blocks.
+
+**Two-phase context protection** relative to `CONTEXT_WINDOW` (200K tokens):
+
+1. **Flush** (soft, at ~187K tokens): Injects a prompt telling the LLM to save important context to `memory/YYYY-MM-DD.md` using the `write_file` tool. The `hasFlushed` flag prevents repeated flush injections. The agent continues running.
+
+2. **Compact** (hard, at ~192K tokens): Messages are split, summarized, and pruned:
+   - Walk backward from the end, keeping recent messages up to 50% of context window
+   - At least 1 message or half the history is always dropped
+   - Orphaned `tool_result` blocks (whose matching `tool_use` was dropped) are repaired
+   - Dropped messages are chunked and sent to `claude-sonnet-4-5-20250929` for summarization
+   - If multiple chunks, a merge pass combines partial summaries
+   - Fallback: if LLM fails, a stats-based summary is produced
+   - A synthetic `[Previous conversation summary]` user message is prepended to the kept messages
+
+**Agent loop integration** (`src/agent.ts`):
+
+```
+for each iteration:
+  call LLM → get response + usage tokens
+
+  if end_turn:
+    if shouldFlush && !hasFlushed → inject flush prompt, continue
+    else → append to session, return
+
+  execute tools
+
+  if shouldFlush && !hasFlushed → inject flush prompt, continue
+
+  if shouldCompact:
+    append new messages to session file (preserve originals)
+    compactSession() → summarize + trim
+    replace in-memory history
+    write compaction marker + compacted messages
+    sync memory index (pick up freshly written memory files)
+    reset token counter and flush flag
+```
+
+### MemoryIndex (`src/memory/index.ts`)
+
+SQLite-backed semantic search engine using `bun:sqlite` with hybrid vector + keyword retrieval.
+
+**Schema**:
+
+- **`files`**: Tracks indexed files by path, content SHA-256 hash, and mtime
+- **`chunks`**: Text segments with file reference, line ranges, content hash, and optional embedding vector (stored as JSON string)
+- **`chunks_fts`**: FTS5 virtual table mirroring chunk text, kept in sync via triggers
+
+**What gets indexed**:
+
+1. **Memory files**: `MEMORY.md` + all `.md` files in `workspace/memory/` — synced via `sync()`, which detects changes by hash comparison
+2. **Session files**: All `.jsonl` files in `workspace/sessions/` — messages parsed and formatted as `"role: content"` blocks before chunking
+3. **Stale cleanup**: On sync, files no longer on disk are removed (except `session:*` entries)
+
+**Chunking**: 1,600 chars (~400 tokens) with 320-char overlap (~80 tokens), breaking on line boundaries.
+
+**Embeddings** (`src/memory/embeddings.ts`): OpenAI `text-embedding-3-small` model, batched up to 100 texts per API call. When `OPENAI_API_KEY` is not set, a no-op embedder is used — chunks are stored without vectors and keyword search still works.
+
+### Hybrid Search (`src/memory/hybrid.ts`)
+
+Two search signals merged with weighted combination:
+
+1. **Vector search**: Cosine similarity between query embedding and all stored chunk embeddings (brute-force scan, no ANN index)
+2. **Keyword search**: FTS5 with BM25 ranking. Query tokenized, lowercased, punctuation-stripped, short tokens removed, remaining AND-joined as quoted FTS5 terms
+
+**Merging**: Default weights 70% vector / 30% keyword. When one side has no results, the other gets 100% weight. Both sides normalized to 0–1 range independently. Overlapping chunks (same chunk ID in both) get additive scores. Filtered by `minScore` (default 0.35), sorted descending, limited to `maxResults` (default 6).
+
+### Memory Search Tool (`src/tools/memory-search.ts`)
+
+Exposed to the LLM as the `memory_search` tool. Calls `memoryIndex.sync()` first (picks up freshly written memory files), then searches. Returns formatted results: `[N] filePath:startLine-endLine (score% match)` with the matching text.
+
+### Circular Data Flow
+
+The key insight is the circular flow between sessions, compaction, and memory:
+
+```
+User message arrives
+    ↓
+SessionStore.get() → load working history (post-compaction)
+    ↓
+Agent loop runs (up to 25 iterations)
+    ↓
+[Context approaching limit?]
+    ├─ shouldFlush → inject "save to memory files" prompt → LLM writes files
+    └─ shouldCompact → summarize old messages, write compaction marker
+            ↓
+        MemoryIndex.sync() → re-index freshly written memory files
+    ↓
+SessionStore.append() → persist new messages
+    ↓
+[Next conversation starts]
+    ├─ SessionStore.get() → compacted history with summary prefix
+    └─ memory_search tool → hybrid search over all memory + session files
+```
+
+Compaction prompts the LLM to write memory files, which get indexed, which become searchable via `memory_search` in future conversations. Session files themselves are also indexed, so past conversations are retrievable even without explicit memory writes.
 
 ## Heartbeat (`src/heartbeat.ts`)
 
@@ -184,7 +311,7 @@ workspace/
 ├── sessions/         # JSONL conversation history
 ├── logs/             # JSONL structured logs (daily rotation)
 ├── cron/             # job persistence (jobs.json)
-└── memory/           # daily memory files
+└── memory/           # daily memory files + index.sqlite (MemoryIndex DB)
 ```
 
 ### Convention Files
@@ -233,19 +360,21 @@ Formats agent iteration progress for display in Telegram:
 ## Data Flow: User Message to Response
 
 ```
-1. User sends "check the weather" in Telegram
-2. grammY handler receives it, acquires agent mutex
-3. makeAgentContext() builds context with fresh skills
-4. runAgent() loads session history from disk
-5. System prompt assembled: base identity + tools + skills + workspace files
-6. Claude called with history + system prompt + tool definitions
-7. Claude responds: tool_use[bash("curl wttr.in")]
-8. bash tool executes the command, returns stdout
-9. Tool result appended to history, Claude called again
+1.  User sends "check the weather" in Telegram
+2.  grammY handler receives it, acquires agent mutex
+3.  makeAgentContext() builds context with fresh skills + memoryIndex
+4.  runAgent() loads session history from disk (post-last-compaction-marker)
+5.  System prompt assembled: base identity + tools + skills + workspace files
+6.  Claude called with history + system prompt + tool definitions
+7.  Claude responds: tool_use[bash("curl wttr.in")]
+8.  bash tool executes the command, returns stdout
+9.  Tool result appended to history, Claude called again
 10. Claude responds: end_turn["It's sunny and 72F"]
-11. Session history saved to disk
-12. Response formatted as Telegram HTML and sent
-13. Agent mutex released
+11. [If context near limit: flush prompt injected → LLM writes memory files]
+12. [If context over limit: compaction → summarize + prune + re-index memory]
+13. Session history saved to disk
+14. Response formatted as Telegram HTML and sent
+15. Agent mutex released
 ```
 
 ## Key Design Decisions
@@ -261,3 +390,9 @@ Formats agent iteration progress for display in Telegram:
 **Skills are lazy-loaded.** The system prompt lists skill names and descriptions. The agent reads the full `SKILL.md` only when it decides to use a skill. This keeps the system prompt concise.
 
 **Convention files as system prompt injection.** Workspace files are the primary mechanism for customizing the agent's behavior, personality, and knowledge. They're loaded once at startup and included in every LLM call.
+
+**Two-phase context protection.** Rather than hard-truncating sessions at a message count, the system uses token estimation to detect when context is filling up. A soft flush prompt gives the LLM a chance to explicitly save important context before the hard compaction step summarizes and prunes. This preserves more information than a simple sliding window.
+
+**Hybrid search for memory retrieval.** Combining vector similarity (semantic) with FTS5 keyword search means queries work even without embeddings (keyword-only fallback) and catch both semantically similar and exact-match content. The brute-force vector scan is acceptable given the expected corpus size for a personal assistant.
+
+**Memory as a circular flow.** Compaction prompts the LLM to write memory files, which get indexed and become searchable in future conversations. Session transcripts are also indexed directly. This creates a self-reinforcing knowledge base without requiring explicit user action.

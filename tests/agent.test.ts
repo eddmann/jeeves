@@ -13,11 +13,15 @@ import {
   buildWorkspaceFile,
 } from "./helpers/factories";
 import { buildStubAuth } from "./helpers/stub-auth";
+import { MemoryIndex } from "../src/memory/index";
+import { createNoOpEmbedder } from "../src/memory/embeddings";
 
 let tmpDir: string;
+let memoryIndex: MemoryIndex;
 
 beforeEach(() => {
   tmpDir = createTempDir();
+  memoryIndex = new MemoryIndex(":memory:", createNoOpEmbedder(), tmpDir);
 });
 
 afterEach(() => {
@@ -40,6 +44,7 @@ function makeCtx(opts: {
     workspaceFiles: opts.workspaceFiles ?? [],
     sessionStore: new SessionStore(tmpDir),
     sessionKey: "test-session",
+    memoryIndex,
     callLLM: async () => {
       callCount++;
       const response = responses.shift();
@@ -204,7 +209,7 @@ describe("agent loop", () => {
 
   test("includes prior session history in LLM context", async () => {
     const sessionStore = new SessionStore(tmpDir);
-    sessionStore.set("history-session", [
+    sessionStore.append("history-session", [
       { role: "user", content: "previous" },
       { role: "assistant", content: "context" },
     ]);
@@ -216,6 +221,7 @@ describe("agent loop", () => {
       workspaceFiles: [],
       sessionStore,
       sessionKey: "history-session",
+      memoryIndex,
       callLLM: async (opts) => {
         receivedMessageCount = opts.messages.length;
         return buildLLMResponse({ text: "with context" });
@@ -269,6 +275,7 @@ describe("agent loop", () => {
       workspaceFiles: [buildWorkspaceFile("MEMORY.md", "Remember this")],
       sessionStore: new SessionStore(tmpDir),
       sessionKey: "test-session",
+      memoryIndex,
       callLLM: async (opts) => {
         receivedSystem = opts.systemPrompt;
         return buildLLMResponse({ text: "ok" });
@@ -292,6 +299,7 @@ describe("agent loop", () => {
       workspaceFiles: [],
       sessionStore: new SessionStore(tmpDir),
       sessionKey: "test-session",
+      memoryIndex,
       callLLM: async (opts) => {
         receivedTools = opts.tools;
         return buildLLMResponse({ text: "ok" });

@@ -33,6 +33,7 @@ export interface LLMResponse {
   text: string;
   toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>;
   stopReason: string;
+  usage: { inputTokens: number; outputTokens: number };
 }
 
 export async function callLLM(opts: {
@@ -151,5 +152,9 @@ export async function callLLM(opts: {
     text,
     toolCalls,
     stopReason: response.stop_reason ?? "end_turn",
+    usage: {
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    },
   };
 }

@@ -15,6 +15,8 @@ import { runAgent, type AgentContext } from "./agent";
 import { HeartbeatRunner } from "./heartbeat";
 import { createTelegramChannel } from "./channel/telegram";
 import { initLogger, log } from "./logger";
+import { MemoryIndex } from "./memory/index";
+import { createOpenAIEmbedder, createNoOpEmbedder } from "./memory/embeddings";
 
 // Agent mutex — prevents overlapping runs
 let agentLock = Promise.resolve();
@@ -125,6 +127,20 @@ async function main() {
   // Create session store
   const sessionStore = new SessionStore(join(workspaceDir, "sessions"));
 
+  // Initialize memory index
+  const openaiKey = process.env.OPENAI_API_KEY;
+  const embedder = openaiKey ? createOpenAIEmbedder(openaiKey) : createNoOpEmbedder();
+  const memoryIndex = new MemoryIndex(
+    join(workspaceDir, "memory", "index.sqlite"),
+    embedder,
+    workspaceDir,
+  );
+  await memoryIndex.sync();
+  await memoryIndex.indexSessionFiles(join(workspaceDir, "sessions"));
+  log.info("startup", "Memory index initialized", {
+    mode: openaiKey ? "semantic + keyword" : "keyword-only",
+  });
+
   // Create cron scheduler
   const cronScheduler = new CronScheduler({
     storePath: join(workspaceDir, "cron", "jobs.json"),
@@ -141,7 +157,7 @@ async function main() {
   });
 
   // Create tools (needs cron scheduler)
-  const tools = allTools({ cronScheduler, workspaceDir });
+  const tools = allTools({ cronScheduler, workspaceDir, memoryIndex });
 
   // Helper to create agent context — reloads skills fresh each run
   function makeAgentContext(sessionKey: string): AgentContext {
@@ -152,6 +168,7 @@ async function main() {
       workspaceFiles,
       sessionStore,
       sessionKey,
+      memoryIndex,
     };
   }
 
@@ -209,6 +226,7 @@ async function main() {
   console.log(`  Telegram: ${channel ? "active" : "not configured"}`);
   console.log(`  Heartbeat: every ${heartbeatIntervalMs / 60000}min`);
   console.log(`  Cron jobs: ${cronScheduler.listJobs().length}`);
+  console.log(`  Memory: active (${openaiKey ? "semantic + keyword" : "keyword-only"})`);
   console.log();
   log.info("startup", "Jeeves is running", {
     workspace: workspaceDir,

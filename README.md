@@ -47,7 +47,9 @@ Message your bot on Telegram. It responds. See [docs/DOCKER.md](docs/DOCKER.md) 
 You (Telegram) → grammY → Agent Loop → Claude + Tools → Reply
 ```
 
-The agent loop calls Claude with conversation history and five tools (`bash`, `read`, `write`, `webfetch`, `cron`). Claude calls tools, results feed back — up to 25 iterations per message. A heartbeat system checks in periodically, and a cron scheduler handles timed jobs.
+The agent loop calls Claude with conversation history and six tools (`bash`, `read`, `write`, `webfetch`, `cron`, `memory_search`). Claude calls tools, results feed back — up to 25 iterations per message. A heartbeat system checks in periodically, and a cron scheduler handles timed jobs.
+
+Long-term memory is backed by a SQLite index with hybrid search (FTS5 keyword + optional OpenAI vector embeddings). When context approaches the limit, the agent saves important facts to memory files and compacts old messages via LLM summarization. Past conversations and memory files are searchable across sessions via the `memory_search` tool.
 
 For the full system design, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -67,6 +69,7 @@ Skills are `SKILL.md` files with YAML frontmatter. Ask the agent to create new o
 | `WORKSPACE_DIR`                   | `./workspace`     | Workspace root                       |
 | `HEARTBEAT_INTERVAL_MINUTES`      | `30`              | Minutes between heartbeat checks     |
 | `HEARTBEAT_ACTIVE_START` / `_END` | `08:00` / `23:00` | Active hours window                  |
+| `OPENAI_API_KEY`                  | —                 | Enables semantic memory search        |
 | `LOG_LEVEL`                       | `info`            | `debug` / `info` / `warn` / `error`  |
 
 ## Docker

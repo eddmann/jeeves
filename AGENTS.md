@@ -72,7 +72,7 @@ src/skills/loader.ts     → SKILL.md discovery (YAML frontmatter, recursive)
 src/skills/prompt.ts     → format skills for system prompt
 ```
 
-Five agent tools: `bash`, `read` (read_file), `write` (write_file), `webfetch` (web_fetch), `cron`. All scoped to workspace directory.
+Six agent tools: `bash`, `read` (read_file), `write` (write_file), `webfetch` (web_fetch), `cron`, `memory_search`. All scoped to workspace directory.
 
 ### Skills
 
