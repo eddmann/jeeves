@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ─── Flags ────────────────────────────────────────────────────────────────────
+
+REINSTALL=false
+for arg in "$@"; do
+  case "$arg" in
+    --reinstall) REINSTALL=true ;;
+    --help|-h)
+      echo "Usage: setup.sh [--reinstall]"
+      echo "  --reinstall  Remove existing Docker containers, volumes, images, and files before setup"
+      exit 0
+      ;;
+  esac
+done
+
 # ─── Colors ────────────────────────────────────────────────────────────────────
 
 if [[ -e /dev/tty ]] && command -v tput &>/dev/null; then
@@ -72,6 +86,45 @@ if ! docker info &>/dev/null 2>&1; then
   exit 1
 fi
 success "Docker daemon running"
+
+# ─── Reinstall (optional) ─────────────────────────────────────────────────────
+
+if [[ "$REINSTALL" == true ]]; then
+  echo
+  info "Reinstall mode — cleaning up existing installation"
+  echo
+
+  read -rp "  ${BOLD}? Existing install directory [/opt/jeeves]:${RESET} " CLEANUP_DIR < /dev/tty
+  CLEANUP_DIR="${CLEANUP_DIR:-/opt/jeeves}"
+
+  if [[ -d "$CLEANUP_DIR" ]] && [[ -f "$CLEANUP_DIR/docker-compose.yml" ]]; then
+    echo
+    echo "  ${RED}${BOLD}WARNING: This will destroy ALL Jeeves data (workspace, sessions, Tailscale state)${RESET}"
+    read -rp "  ${BOLD}? Type 'reinstall' to confirm:${RESET} " CONFIRM_REINSTALL < /dev/tty
+
+    if [[ "$CONFIRM_REINSTALL" != "reinstall" ]]; then
+      error "Aborted"
+      exit 1
+    fi
+
+    echo
+    info "Stopping containers and removing volumes + images..."
+    (cd "$CLEANUP_DIR" && $COMPOSE down -v --rmi all 2>/dev/null) || true
+
+    info "Removing install directory ($CLEANUP_DIR)..."
+    if [[ -w "$CLEANUP_DIR" ]]; then
+      rm -rf "$CLEANUP_DIR"
+    else
+      sudo rm -rf "$CLEANUP_DIR"
+    fi
+
+    success "Cleanup complete"
+  else
+    warn "No existing installation found at $CLEANUP_DIR — continuing with fresh install"
+  fi
+
+  echo
+fi
 
 # ─── Configuration ─────────────────────────────────────────────────────────────
 
