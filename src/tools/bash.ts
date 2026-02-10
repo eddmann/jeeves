@@ -30,19 +30,29 @@ export function createBashTool(workspaceDir: string): Tool {
       try {
         const proc = Bun.spawn(["sh", "-c", command], {
           cwd: workspaceDir,
-          timeout,
           env: process.env,
           stderr: "pipe",
         });
+
+        // Manual timeout — Bun.spawn's native timeout option is unreliable on Linux
+        let killed = false;
+        const timer = setTimeout(() => {
+          killed = true;
+          proc.kill();
+        }, timeout);
 
         const [stdout, stderr, exitCode] = await Promise.all([
           new Response(proc.stdout).text(),
           new Response(proc.stderr).text(),
           proc.exited,
         ]);
+        clearTimeout(timer);
 
         const output = (stdout + stderr).trim();
 
+        if (killed) {
+          return `[exit code ${exitCode}] (timeout after ${timeout}ms)\n${output}`.trim();
+        }
         if (exitCode !== 0) {
           return `[exit code ${exitCode}]\n${output}`;
         }
