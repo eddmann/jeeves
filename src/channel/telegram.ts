@@ -4,7 +4,7 @@
 
 import { Bot } from "grammy";
 import { run, type RunnerHandle } from "@grammyjs/runner";
-import { log } from "../logger";
+import { log, formatError } from "../logger";
 import { formatProgress, type ProgressUpdate } from "../progress";
 
 export interface Channel {
@@ -130,6 +130,8 @@ export function createTelegramChannel(opts: {
     }
 
     return withChatLock(chatId, async () => {
+      const messageStart = Date.now();
+
       // Send typing indicator
       await ctx.replyWithChatAction("typing");
       const typingInterval = setInterval(() => {
@@ -179,6 +181,7 @@ export function createTelegramChannel(opts: {
           chatId,
           chars: response.length,
           chunks: chunks.length,
+          ms: Date.now() - messageStart,
         });
         await sendFormatted((t, o) => ctx.reply(t, o as Parameters<typeof ctx.reply>[1]), response);
       } catch (err) {
@@ -190,8 +193,13 @@ export function createTelegramChannel(opts: {
             // Silently ignore
           }
         }
-        log.error("telegram", "Error handling message", { chatId, error: String(err) });
-        await ctx.reply("Sorry, something went wrong. Check the logs for details.");
+        log.error("telegram", "Error handling message", {
+          chatId,
+          ms: Date.now() - messageStart,
+          ...formatError(err),
+        });
+        const errMsg = err instanceof Error ? err.message : String(err);
+        await ctx.reply(`Something went wrong: ${errMsg}`);
       }
     });
   });

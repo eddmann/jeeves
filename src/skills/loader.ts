@@ -6,7 +6,7 @@
 import { existsSync, readdirSync, statSync, readFileSync } from "fs";
 import { join, basename, dirname } from "path";
 import { parse as parseYaml } from "yaml";
-import { log } from "../logger";
+import { log, formatError } from "../logger";
 
 export interface Skill {
   name: string;
@@ -106,7 +106,7 @@ export function loadSkillsFromDirs(dirs: string[]): Skill[] {
           baseDir: dirname(filePath),
         });
       } catch (err) {
-        log.warn("skills", "Error loading skill", { path: filePath, error: String(err) });
+        log.warn("skills", "Error loading skill", { path: filePath, ...formatError(err) });
       }
     }
   }

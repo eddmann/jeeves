@@ -5,7 +5,7 @@
 import { Cron } from "croner";
 import { randomUUID } from "crypto";
 import { loadJobs, saveJobs, type CronJob } from "./store";
-import { log } from "../logger";
+import { log, formatError } from "../logger";
 
 export class CronScheduler {
   private jobs: CronJob[] = [];
@@ -92,7 +92,7 @@ export class CronScheduler {
           const next = cron.nextRun();
           job.nextRunAtMs = next ? next.getTime() : undefined;
         } catch (err) {
-          log.error("cron", "Invalid cron expression", { jobId: job.id, error: String(err) });
+          log.error("cron", "Invalid cron expression", { jobId: job.id, ...formatError(err) });
           job.nextRunAtMs = undefined;
         }
         break;
@@ -152,7 +152,7 @@ export class CronScheduler {
       job.lastRunAtMs = Date.now();
       job.lastStatus = "ok";
     } catch (err) {
-      log.error("cron", "Job failed", { id: job.id, error: String(err) });
+      log.error("cron", "Job failed", { id: job.id, ...formatError(err) });
       job.lastRunAtMs = Date.now();
       job.lastStatus = "error";
     }

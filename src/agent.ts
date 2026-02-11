@@ -10,7 +10,7 @@ import type { WorkspaceFile } from "./workspace/loader";
 import { buildSystemPrompt } from "./workspace/prompt";
 import { formatSkillsForPrompt } from "./skills/prompt";
 import type { SessionStore } from "./session";
-import { log } from "./logger";
+import { log, formatError } from "./logger";
 import type { ProgressUpdate } from "./progress";
 import type { MemoryIndex } from "./memory/index";
 import { shouldFlush, shouldCompact, buildFlushPrompt, compactSession } from "./memory/compaction";
@@ -203,9 +203,7 @@ export async function runAgent(
       try {
         await ctx.memoryIndex.sync();
       } catch (err) {
-        log.warn("agent", "Memory index sync failed after compaction", {
-          error: err instanceof Error ? err.message : String(err),
-        });
+        log.warn("agent", "Memory index sync failed after compaction", formatError(err));
       }
 
       hasFlushed = false;

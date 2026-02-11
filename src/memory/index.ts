@@ -11,7 +11,7 @@ import * as sqliteVec from "sqlite-vec";
 import type { EmbedFn } from "./embeddings";
 import type { SearchHit } from "./hybrid";
 import { cosineSimilarity, buildFtsQuery, bm25RankToScore, mergeHybridResults } from "./hybrid";
-import { log } from "../logger";
+import { log, formatError } from "../logger";
 import type { LLMMessage } from "../llm";
 
 let customSqliteSet = false;
@@ -192,7 +192,7 @@ export class MemoryIndex {
     } catch (err) {
       log.warn("memory-index", "Embedding failed, storing without vectors", {
         file: filePath,
-        error: err instanceof Error ? err.message : String(err),
+        ...formatError(err),
       });
     }
 
@@ -235,9 +235,7 @@ export class MemoryIndex {
         vectorHits = this.vectorSearch(queryEmbedding, maxResults * 4);
       }
     } catch (err) {
-      log.warn("memory-index", "Vector search failed", {
-        error: err instanceof Error ? err.message : String(err),
-      });
+      log.warn("memory-index", "Vector search failed", formatError(err));
     }
 
     // FTS5 keyword search

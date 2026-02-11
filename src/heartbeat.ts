@@ -4,7 +4,7 @@
 
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { log } from "./logger";
+import { log, formatError } from "./logger";
 
 export class HeartbeatRunner {
   private interval: ReturnType<typeof setInterval> | null = null;
@@ -81,7 +81,7 @@ export class HeartbeatRunner {
       this.lastSentText = trimmed;
       this.lastSentAt = now;
     } catch (err) {
-      log.error("heartbeat", "Error", { error: String(err) });
+      log.error("heartbeat", "Error", formatError(err));
     }
   }
 

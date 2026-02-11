@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "f
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { refreshAnthropicToken, type OAuthTokens } from "./oauth";
-import { log } from "../logger";
+import { log, formatError } from "../logger";
 
 export type AuthCredential =
   | { type: "api_key"; key: string }
@@ -125,7 +125,7 @@ export class AuthStorage {
       if (this.credential?.type === "oauth" && Date.now() < this.credential.expiresAt) {
         return this.credential;
       }
-      log.error("auth", "OAuth token refresh failed", { error: String(err) });
+      log.error("auth", "OAuth token refresh failed", formatError(err));
       return null;
     } finally {
       if (release) {

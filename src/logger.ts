@@ -53,6 +53,19 @@ class Logger {
   }
 }
 
+/** Extract useful fields from an error for structured logging. */
+export function formatError(err: unknown): Record<string, unknown> {
+  if (err instanceof Error) {
+    return {
+      error: err.message,
+      errorType: err.constructor.name,
+      stack: err.stack,
+      ...("status" in err ? { status: (err as { status: number }).status } : {}),
+    };
+  }
+  return { error: String(err) };
+}
+
 // Module-level singleton
 export let log = new Logger();
 

@@ -4,7 +4,7 @@
 
 import type { LLMContentBlock, LLMMessage, LLMResponse } from "../llm";
 import type { AuthStorage } from "../auth/storage";
-import { log } from "../logger";
+import { log, formatError } from "../logger";
 
 export const CONTEXT_WINDOW = 200_000;
 export const RESERVE_FLOOR = 8_192;
@@ -207,9 +207,7 @@ export async function summarizeMessages(opts: {
 
     return partialSummaries[0] || fallbackSummary(opts.messages);
   } catch (err) {
-    log.warn("compaction", "LLM summarization failed, using fallback", {
-      error: err instanceof Error ? err.message : String(err),
-    });
+    log.warn("compaction", "LLM summarization failed, using fallback", formatError(err));
     return fallbackSummary(opts.messages);
   }
 }

@@ -14,7 +14,7 @@ import { SessionStore } from "./session";
 import { runAgent, type AgentContext } from "./agent";
 import { HeartbeatRunner } from "./heartbeat";
 import { createTelegramChannel } from "./channel/telegram";
-import { initLogger, log } from "./logger";
+import { initLogger, log, formatError } from "./logger";
 import { MemoryIndex } from "./memory/index";
 import { createOpenAIEmbedder, createNoOpEmbedder } from "./memory/embeddings";
 import { withAgentLock } from "./agent-lock";
@@ -244,6 +244,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  log.error("startup", "Fatal error", { error: String(err) });
+  log.error("startup", "Fatal error", formatError(err));
   process.exit(1);
 });

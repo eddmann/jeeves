@@ -11,7 +11,7 @@ import {
   toClaudeCodeToolName,
   fromClaudeCodeToolName,
 } from "./auth/stealth";
-import { log } from "./logger";
+import { log, formatError } from "./logger";
 
 export interface LLMMessage {
   role: "user" | "assistant";
@@ -124,8 +124,7 @@ export async function callLLM(opts: {
     response = await Promise.race([stream.finalMessage(), timeout]);
   } catch (err) {
     stream.abort();
-    const status = (err as { status?: number }).status;
-    log.error("llm", "API error", { status, message: String(err) });
+    log.error("llm", "API error", { ms: Date.now() - llmStart, ...formatError(err) });
     throw err;
   }
 
