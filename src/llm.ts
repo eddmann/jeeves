@@ -33,7 +33,12 @@ export interface LLMResponse {
   text: string;
   toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>;
   stopReason: string;
-  usage: { inputTokens: number; outputTokens: number };
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheCreationInputTokens: number;
+    cacheReadInputTokens: number;
+  };
 }
 
 export async function callLLM(opts: {
@@ -64,21 +69,36 @@ export async function callLLM(opts: {
 
   const client = new Anthropic(clientOpts as ConstructorParameters<typeof Anthropic>[0]);
 
-  // Build system prompt
-  const systemBlocks: Array<{ type: "text"; text: string }> = [];
+  // Build system prompt with cache_control on the last block
+  const systemBlocks: Array<{
+    type: "text";
+    text: string;
+    cache_control?: { type: "ephemeral" };
+  }> = [];
   if (isOAuth) {
     systemBlocks.push({ type: "text", text: getStealthSystemPrefix() });
   }
   if (opts.systemPrompt) {
     systemBlocks.push({ type: "text", text: opts.systemPrompt });
   }
+  if (systemBlocks.length > 0) {
+    systemBlocks[systemBlocks.length - 1].cache_control = { type: "ephemeral" };
+  }
 
-  // Remap tool names for OAuth mode
-  const tools = opts.tools.map((t) => ({
+  // Remap tool names for OAuth mode, cache_control on last tool
+  const tools: Array<{
+    name: string;
+    description: string;
+    input_schema: Record<string, unknown>;
+    cache_control?: { type: "ephemeral" };
+  }> = opts.tools.map((t) => ({
     name: isOAuth ? toClaudeCodeToolName(t.name) : t.name,
     description: t.description,
     input_schema: t.input_schema,
   }));
+  if (tools.length > 0) {
+    tools[tools.length - 1].cache_control = { type: "ephemeral" };
+  }
 
   // Convert messages
   const messages = opts.messages.map((m) => {
@@ -159,6 +179,8 @@ export async function callLLM(opts: {
     usage: {
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
+      cacheCreationInputTokens: response.usage.cache_creation_input_tokens ?? 0,
+      cacheReadInputTokens: response.usage.cache_read_input_tokens ?? 0,
     },
   };
 }

@@ -44,7 +44,12 @@ export function buildLLMResponse(overrides?: Partial<LLMResponse>): LLMResponse 
     text: overrides?.text ?? "Hello",
     toolCalls: overrides?.toolCalls ?? [],
     stopReason: overrides?.stopReason ?? "end_turn",
-    usage: overrides?.usage ?? { inputTokens: 100, outputTokens: 50 },
+    usage: overrides?.usage ?? {
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+    },
   };
 }
 

@@ -84,6 +84,13 @@ export async function runAgent(
 
     // Update token count from API response
     totalTokens = response.usage.inputTokens + response.usage.outputTokens;
+    log.info("agent", "Token usage", {
+      iteration: i + 1,
+      inputTokens: response.usage.inputTokens,
+      outputTokens: response.usage.outputTokens,
+      cacheCreation: response.usage.cacheCreationInputTokens,
+      cacheRead: response.usage.cacheReadInputTokens,
+    });
 
     // Build assistant content blocks
     const assistantContent: LLMContentBlock[] = [];
