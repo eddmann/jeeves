@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.72.1",
+    "@grammyjs/runner": "^2.0.3",
     "@mozilla/readability": "^0.6.0",
     "croner": "^9.1.0",
     "grammy": "^1.39.3",

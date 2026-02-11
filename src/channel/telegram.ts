@@ -3,6 +3,7 @@
  */
 
 import { Bot } from "grammy";
+import { run, type RunnerHandle } from "@grammyjs/runner";
 import { log } from "../logger";
 import { formatProgress, type ProgressUpdate } from "../progress";
 
@@ -195,18 +196,18 @@ export function createTelegramChannel(opts: {
     });
   });
 
+  let handle: RunnerHandle | null = null;
+
   return {
     async start() {
       log.info("telegram", "Bot starting");
-      bot.start({
-        onStart: (botInfo) => {
-          log.info("telegram", "Bot running", { username: botInfo.username });
-        },
-      });
+      await bot.init();
+      log.info("telegram", "Bot running", { username: bot.botInfo.username });
+      handle = run(bot);
     },
 
     stop() {
-      bot.stop();
+      handle?.stop();
     },
 
     async send(chatId: string, text: string) {
