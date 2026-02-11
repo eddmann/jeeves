@@ -170,6 +170,7 @@ export async function callLLM(opts: {
     textChars: text.length,
     toolCalls: toolCalls.length,
     ms: Date.now() - llmStart,
+    usage: response.usage,
   });
 
   return {
