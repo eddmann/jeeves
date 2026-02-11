@@ -42,15 +42,16 @@ Run `make help` for the full list of targets.
 - **Error handling:** try-catch with `err instanceof Error ? err.message : String(err)` — tools never throw to agent
 - **Formatting:** Prettier — double quotes, semicolons, trailing commas, 100 char lines, 2-space indent
 - **Package manager:** bun only (`bun.lock`)
-- **Bun APIs:** `Bun.spawnSync()` for shell, `Bun.file().text()` for reads, `Bun.write()` for writes
+- **Bun APIs:** `Bun.spawn()` for shell, `Bun.file().text()` for reads, `Bun.write()` for writes
 
 ### Architecture
 
 ```
-src/index.ts             → entry point, CLI commands, composition root, agent mutex
+src/index.ts             → entry point, CLI commands, composition root
 src/agent.ts             → agent loop (max 25 iterations): LLM → tools → repeat
+src/agent-lock.ts        → agent mutex (withAgentLock, 3-min timeout)
 src/llm.ts               → Anthropic SDK wrapper, streaming, OAuth stealth mode
-src/session.ts           → JSONL session store (max 50 messages)
+src/session.ts           → JSONL session store (append-only, compaction markers, rotation)
 src/logger.ts            → JSONL structured logger (daily rotating)
 src/heartbeat.ts         → periodic agent check-ins with dedup + active hours
 src/progress.ts          → progress update formatting for Telegram
@@ -59,14 +60,19 @@ src/auth/oauth.ts        → OAuth PKCE flow
 src/auth/stealth.ts      → tool name remapping + headers for OAuth mode
 src/channel/telegram.ts  → grammY bot, markdown→HTML, message splitting
 src/tools/index.ts       → tool registry (Tool interface)
-src/tools/bash.ts        → shell execution (Bun.spawnSync, 30s timeout)
+src/tools/bash.ts        → shell execution (Bun.spawn, 30s timeout)
 src/tools/read-file.ts   → file reading with line numbers
 src/tools/write-file.ts  → file writing with auto-mkdir
 src/tools/edit-file.ts   → find-and-replace file editing
 src/tools/web-fetch.ts   → HTTP fetch + Readability extraction (10k char limit)
 src/tools/cron.ts        → cron job scheduling tool
+src/tools/memory-search.ts → semantic search over memory and session transcripts
 src/cron/scheduler.ts    → cron job runner with setTimeout timer
 src/cron/store.ts        → cron job JSONL persistence
+src/memory/index.ts      → SQLite-backed memory index (vector + FTS5 hybrid search)
+src/memory/compaction.ts → token-based session compaction with LLM summarization
+src/memory/embeddings.ts → OpenAI text-embedding-3-small wrapper
+src/memory/hybrid.ts     → hybrid search ranking (cosine + BM25 merge)
 src/workspace/loader.ts  → convention file loading, workspace init, .env loading
 src/workspace/prompt.ts  → system prompt builder
 src/skills/loader.ts     → SKILL.md discovery (YAML frontmatter, recursive)
@@ -102,7 +108,7 @@ buildUserMessage(), buildAssistantMessage(), buildToolUseMessage(), buildToolRes
 
 ## PR & Workflow Rules
 
-- Single `main` branch, no remotes configured
+- Single `main` branch, origin remote at github.com/eddmann/jeeves
 - Commit style: conventional commits (`feat:`, `refactor:`, `fix:`)
 - No PR process, no branch protection, no CODEOWNERS
 - Personal project — direct commits to main
@@ -113,8 +119,8 @@ buildUserMessage(), buildAssistantMessage(), buildToolUseMessage(), buildToolRes
 - **auth.json** stores OAuth tokens with mode `0o600` — handled by `src/auth/storage.ts`
 - **Extensionless imports** — `./foo` not `./foo.ts` — requires `moduleResolution: "bundler"` in tsconfig
 - **OAuth stealth mode** remaps tool names via `src/auth/stealth.ts` — don't rename tools without updating the mapping
-- **Agent mutex** (`withAgentLock` in `src/index.ts`) serializes all agent runs (Telegram, cron, heartbeat) — long tool executions block everything
-- **SessionStore** silently drops orphaned `tool_result` messages when truncating — history may lose context after 50 messages
+- **Agent mutex** (`withAgentLock` in `src/agent-lock.ts`) serializes all agent runs (Telegram, cron, heartbeat) — long tool executions block everything
+- **Session compaction** repairs orphaned `tool_result` blocks and summarizes old messages via LLM — some tool context may be lost after compaction
 - **`workspace/`** is gitignored runtime state — templates seeded from `src/workspace/templates/` on first run
 - **Heartbeat** deduplicates identical responses within 24h and suppresses `HEARTBEAT_OK` replies
 - **`runAgent`** mutates the `history` array in place — if capturing messages in tests, capture `.length` not the array reference
