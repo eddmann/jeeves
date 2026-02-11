@@ -9,6 +9,7 @@ import { createReadFileTool } from "./read-file";
 import { createWriteFileTool } from "./write-file";
 import { createEditFileTool } from "./edit-file";
 import { webFetchTool } from "./web-fetch";
+import { webSearchTool } from "./web-search";
 import { createCronTool } from "./cron";
 import { createMemorySearchTool } from "./memory-search";
 
@@ -30,6 +31,7 @@ export function allTools(opts: {
     createWriteFileTool(opts.workspaceDir),
     createEditFileTool(opts.workspaceDir),
     webFetchTool,
+    webSearchTool,
     createCronTool(opts.cronScheduler),
     createMemorySearchTool(opts.memoryIndex),
   ];

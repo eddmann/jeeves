@@ -38,6 +38,7 @@ You have access to these tools:
 - **write** — Write content to files (creates directories)
 - **edit** — Edit files by finding and replacing text
 - **webfetch** — Fetch and extract text from URLs
+- **web_search** — Search the web via DuckDuckGo
 - **cron** — Manage scheduled jobs (add/list/remove/run/status)
 - **memory_search** — Search long-term memory and past conversations`);
 
