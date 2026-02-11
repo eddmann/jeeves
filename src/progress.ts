@@ -14,6 +14,7 @@ const TOOL_LABELS: Record<string, string> = {
   bash: "Running command",
   read: "Reading file",
   write: "Writing file",
+  edit: "Editing file",
   webfetch: "Fetching web page",
   cron: "Managing schedule",
 };

@@ -36,6 +36,7 @@ You have access to these tools:
 - **bash** — Execute shell commands
 - **read** — Read file contents with line numbers
 - **write** — Write content to files (creates directories)
+- **edit** — Edit files by finding and replacing text
 - **webfetch** — Fetch and extract text from URLs
 - **cron** — Manage scheduled jobs (add/list/remove/run/status)`);
 

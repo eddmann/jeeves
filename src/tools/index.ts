@@ -7,6 +7,7 @@ import type { MemoryIndex } from "../memory/index";
 import { createBashTool } from "./bash";
 import { createReadFileTool } from "./read-file";
 import { createWriteFileTool } from "./write-file";
+import { createEditFileTool } from "./edit-file";
 import { webFetchTool } from "./web-fetch";
 import { createCronTool } from "./cron";
 import { createMemorySearchTool } from "./memory-search";
@@ -27,6 +28,7 @@ export function allTools(opts: {
     createBashTool(opts.workspaceDir),
     createReadFileTool(opts.workspaceDir),
     createWriteFileTool(opts.workspaceDir),
+    createEditFileTool(opts.workspaceDir),
     webFetchTool,
     createCronTool(opts.cronScheduler),
     createMemorySearchTool(opts.memoryIndex),
