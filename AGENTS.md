@@ -62,6 +62,7 @@ src/tools/index.ts       → tool registry (Tool interface)
 src/tools/bash.ts        → shell execution (Bun.spawnSync, 30s timeout)
 src/tools/read-file.ts   → file reading with line numbers
 src/tools/write-file.ts  → file writing with auto-mkdir
+src/tools/edit-file.ts   → find-and-replace file editing
 src/tools/web-fetch.ts   → HTTP fetch + Readability extraction (10k char limit)
 src/tools/cron.ts        → cron job scheduling tool
 src/cron/scheduler.ts    → cron job runner with setTimeout timer
@@ -72,7 +73,7 @@ src/skills/loader.ts     → SKILL.md discovery (YAML frontmatter, recursive)
 src/skills/prompt.ts     → format skills for system prompt
 ```
 
-Six agent tools: `bash`, `read` (read_file), `write` (write_file), `webfetch` (web_fetch), `cron`, `memory_search`. All scoped to workspace directory.
+Seven agent tools: `bash`, `read` (read_file), `write` (write_file), `edit` (edit_file), `webfetch` (web_fetch), `cron`, `memory_search`. All scoped to workspace directory.
 
 ### Skills
 

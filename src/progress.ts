@@ -17,6 +17,7 @@ const TOOL_LABELS: Record<string, string> = {
   edit: "Editing file",
   webfetch: "Fetching web page",
   cron: "Managing schedule",
+  memory_search: "Searching memory",
 };
 
 export function formatProgress(update: ProgressUpdate): string {
