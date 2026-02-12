@@ -15,7 +15,7 @@ const TOOL_LABELS: Record<string, string> = {
   read: "Reading file",
   write: "Writing file",
   edit: "Editing file",
-  webfetch: "Fetching web page",
+  web_fetch: "Fetching web page",
   web_search: "Searching the web",
   cron: "Managing schedule",
   memory_search: "Searching memory",

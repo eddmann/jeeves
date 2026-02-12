@@ -392,19 +392,11 @@ describe("agent loop", () => {
 
     await runAgent(ctx, content);
 
-    // Read back persisted session — image blocks should be replaced with [Image]
     const saved = sessionStore.get("sanitize-session");
-    for (const msg of saved) {
-      if (typeof msg.content === "string") continue;
-      for (const block of msg.content) {
-        expect(block.type).not.toBe("image");
-      }
-    }
-    // Verify the [Image] placeholder is present
     const userMsg = saved.find((m) => m.role === "user" && Array.isArray(m.content));
-    expect(userMsg).toBeDefined();
-    const textBlocks = (userMsg!.content as LLMContentBlock[]).filter((b) => b.type === "text");
-    expect(textBlocks.some((b) => (b as { text: string }).text === "[Image]")).toBe(true);
+    const blocks = userMsg!.content as LLMContentBlock[];
+    expect(blocks.some((b) => b.type === "image")).toBe(false);
+    expect(blocks).toContainEqual({ type: "text", text: "[Image]" });
   });
 });
 
@@ -455,27 +447,16 @@ describe("sanitizeForPersist", () => {
 
 describe("system prompt building", () => {
   test("includes base identity text", () => {
-    const prompt = buildSystemPrompt({ workspaceFiles: [], skillsPrompt: "", isOAuth: false });
+    const prompt = buildSystemPrompt({ workspaceFiles: [], skillsPrompt: "" });
 
     expect(prompt).toContain("You are Jeeves");
     expect(prompt).toContain("personal AI assistant");
   });
 
-  test("includes tools section listing all 5 tools", () => {
-    const prompt = buildSystemPrompt({ workspaceFiles: [], skillsPrompt: "", isOAuth: false });
-
-    expect(prompt).toContain("## Tools");
-    expect(prompt).toContain("bash");
-    expect(prompt).toContain("read");
-    expect(prompt).toContain("write");
-    expect(prompt).toContain("webfetch");
-    expect(prompt).toContain("cron");
-  });
-
   test("includes workspace file content under project context", () => {
     const files = [buildWorkspaceFile("MEMORY.md", "Remember this")];
 
-    const prompt = buildSystemPrompt({ workspaceFiles: files, skillsPrompt: "", isOAuth: false });
+    const prompt = buildSystemPrompt({ workspaceFiles: files, skillsPrompt: "" });
 
     expect(prompt).toContain("## Project Context");
     expect(prompt).toContain("MEMORY.md");
@@ -486,7 +467,7 @@ describe("system prompt building", () => {
     const skills = [buildSkill({ name: "deploy", description: "Deploy the app" })];
     const skillsPrompt = formatSkillsForPrompt(skills);
 
-    const prompt = buildSystemPrompt({ workspaceFiles: [], skillsPrompt, isOAuth: false });
+    const prompt = buildSystemPrompt({ workspaceFiles: [], skillsPrompt });
 
     expect(prompt).toContain("<available_skills>");
     expect(prompt).toContain("<name>deploy</name>");
@@ -496,14 +477,14 @@ describe("system prompt building", () => {
   test("omits skills section when no skills exist", () => {
     const skillsPrompt = formatSkillsForPrompt([]);
 
-    const prompt = buildSystemPrompt({ workspaceFiles: [], skillsPrompt, isOAuth: false });
+    const prompt = buildSystemPrompt({ workspaceFiles: [], skillsPrompt });
 
     expect(prompt).not.toContain("<available_skills>");
     expect(prompt).not.toContain("## Skills");
   });
 
   test("includes self-extension instructions", () => {
-    const prompt = buildSystemPrompt({ workspaceFiles: [], skillsPrompt: "", isOAuth: false });
+    const prompt = buildSystemPrompt({ workspaceFiles: [], skillsPrompt: "" });
 
     expect(prompt).toContain("## Self-Extension");
     expect(prompt).toContain("SKILL.md");

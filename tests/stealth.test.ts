@@ -12,7 +12,8 @@ describe("OAuth stealth mode", () => {
       expect(toClaudeCodeToolName("bash")).toBe("Bash");
       expect(toClaudeCodeToolName("read")).toBe("Read");
       expect(toClaudeCodeToolName("write")).toBe("Write");
-      expect(toClaudeCodeToolName("webfetch")).toBe("WebFetch");
+      expect(toClaudeCodeToolName("web_fetch")).toBe("WebFetch");
+      expect(toClaudeCodeToolName("web_search")).toBe("WebSearch");
     });
 
     test("leaves unmapped tool names unchanged", () => {
@@ -20,11 +21,11 @@ describe("OAuth stealth mode", () => {
     });
 
     test("reverses remapped names back to internal names", () => {
-      const tools = [{ name: "bash" }, { name: "read" }, { name: "webfetch" }];
+      const tools = [{ name: "bash" }, { name: "read" }, { name: "web_fetch" }];
 
       expect(fromClaudeCodeToolName("Bash", tools)).toBe("bash");
       expect(fromClaudeCodeToolName("Read", tools)).toBe("read");
-      expect(fromClaudeCodeToolName("WebFetch", tools)).toBe("webfetch");
+      expect(fromClaudeCodeToolName("WebFetch", tools)).toBe("web_fetch");
     });
 
     test("returns unknown Claude Code names as-is when no match exists", () => {

@@ -1,5 +1,10 @@
 import { describe, test, expect } from "bun:test";
-import { markdownToTelegramHTML, splitMessage, MAX_MESSAGE_LENGTH } from "../src/channel/telegram";
+import {
+  markdownToTelegramHTML,
+  splitMessage,
+  getReplyContext,
+  MAX_MESSAGE_LENGTH,
+} from "../src/channel/telegram";
 import { formatProgress } from "../src/progress";
 
 describe("markdown to Telegram HTML", () => {
@@ -125,8 +130,11 @@ describe("progress formatting", () => {
       bash: "Running command",
       read: "Reading file",
       write: "Writing file",
-      webfetch: "Fetching web page",
+      edit: "Editing file",
+      web_fetch: "Fetching web page",
+      web_search: "Searching the web",
       cron: "Managing schedule",
+      memory_search: "Searching memory",
     };
 
     for (const [tool, label] of Object.entries(expected)) {
@@ -176,5 +184,46 @@ describe("progress formatting", () => {
     });
 
     expect(result).toBe("Reading file");
+  });
+});
+
+describe("reply context", () => {
+  test("returns null for undefined input", () => {
+    expect(getReplyContext(undefined)).toBeNull();
+  });
+
+  test("returns null for null input", () => {
+    expect(getReplyContext(null)).toBeNull();
+  });
+
+  test("returns null when message has no text or caption", () => {
+    expect(getReplyContext({})).toBeNull();
+    expect(getReplyContext({ text: "" })).toBeNull();
+  });
+
+  test("formats text reply as [Replying to: <text>]", () => {
+    const result = getReplyContext({ text: "Hello world" });
+
+    expect(result).toBe("[Replying to: Hello world]");
+  });
+
+  test("uses caption when text is absent", () => {
+    const result = getReplyContext({ caption: "Photo caption" });
+
+    expect(result).toBe("[Replying to: Photo caption]");
+  });
+
+  test("truncates text longer than 300 chars with ...", () => {
+    const long = "a".repeat(400);
+    const result = getReplyContext({ text: long });
+
+    expect(result).toBe(`[Replying to: ${"a".repeat(300)}...]`);
+  });
+
+  test("does not truncate text at exactly 300 chars", () => {
+    const exact = "b".repeat(300);
+    const result = getReplyContext({ text: exact });
+
+    expect(result).toBe(`[Replying to: ${"b".repeat(300)}]`);
   });
 });

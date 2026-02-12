@@ -9,7 +9,7 @@ import type { Tool } from "./index";
 const MAX_CONTENT_LENGTH = 10000;
 
 export const webFetchTool: Tool = {
-  name: "webfetch",
+  name: "web_fetch",
   description:
     "Fetch a URL and extract readable text content. Useful for reading web pages, documentation, articles.",
   inputSchema: {

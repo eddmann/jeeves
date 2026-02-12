@@ -66,7 +66,6 @@ export async function runAgent(
   const systemPrompt = buildSystemPrompt({
     workspaceFiles: ctx.workspaceFiles,
     skillsPrompt,
-    isOAuth: ctx.authStorage.isOAuth(),
   });
 
   // Append user message

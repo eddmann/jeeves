@@ -77,7 +77,7 @@ export function splitMessage(text: string): string[] {
   return chunks;
 }
 
-function getReplyContext(replyMsg: unknown): string | null {
+export function getReplyContext(replyMsg: unknown): string | null {
   const msg = replyMsg as { text?: string; caption?: string } | undefined;
   if (!msg) return null;
   const text = msg.text ?? msg.caption;

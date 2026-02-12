@@ -51,10 +51,10 @@ export function getStealthSystemPrefix(): string {
 
 /**
  * Map a tool name to Claude Code's canonical casing.
- * e.g. "bash" -> "Bash", "read" -> "Read", "webfetch" -> "WebFetch"
+ * e.g. "bash" -> "Bash", "read" -> "Read", "web_fetch" -> "WebFetch", "web_search" -> "WebSearch"
  */
 export function toClaudeCodeToolName(name: string): string {
-  return ccToolLookup.get(name.toLowerCase()) ?? name;
+  return ccToolLookup.get(name.toLowerCase().replace(/_/g, "")) ?? name;
 }
 
 /**
@@ -63,8 +63,8 @@ export function toClaudeCodeToolName(name: string): string {
  */
 export function fromClaudeCodeToolName(name: string, tools?: Array<{ name: string }>): string {
   if (tools && tools.length > 0) {
-    const lowerName = name.toLowerCase();
-    const matched = tools.find((t) => t.name.toLowerCase() === lowerName);
+    const normalized = name.toLowerCase().replace(/_/g, "");
+    const matched = tools.find((t) => t.name.toLowerCase().replace(/_/g, "") === normalized);
     if (matched) return matched.name;
   }
   return name;

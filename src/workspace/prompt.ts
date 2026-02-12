@@ -22,25 +22,11 @@ You can extend your own capabilities:
 export function buildSystemPrompt(opts: {
   workspaceFiles: WorkspaceFile[];
   skillsPrompt: string;
-  isOAuth: boolean;
 }): string {
   const sections: string[] = [];
 
   // Base identity
   sections.push(BASE_IDENTITY);
-
-  // Available tools
-  sections.push(`## Tools
-
-You have access to these tools:
-- **bash** — Execute shell commands
-- **read** — Read file contents with line numbers
-- **write** — Write content to files (creates directories)
-- **edit** — Edit files by finding and replacing text
-- **webfetch** — Fetch and extract text from URLs
-- **web_search** — Search the web via DuckDuckGo
-- **cron** — Manage scheduled jobs (add/list/remove/run/status)
-- **memory_search** — Search long-term memory and past conversations`);
 
   // Skills
   if (opts.skillsPrompt) {
