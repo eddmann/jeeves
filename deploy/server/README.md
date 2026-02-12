@@ -63,7 +63,7 @@ ssh root@jeeves  # from any device on your tailnet
 
 ## Semantic Memory (Optional)
 
-Setting `OPENAI_API_KEY` in `.env` enables semantic memory search using OpenAI embeddings (`text-embedding-3-small`). This gives the memory system hybrid search (70% vector + 30% keyword) instead of keyword-only FTS5 search. The setup script will prompt for this.
+Setting `OPENAI_API_KEY` in `.env` enables semantic memory search using OpenAI embeddings (`text-embedding-3-small`) and voice/audio transcription via Whisper. This gives the memory system hybrid search (70% vector + 30% keyword) instead of keyword-only FTS5 search. The setup script will prompt for this.
 
 ## Monitoring
 

@@ -61,16 +61,16 @@ Skills are `SKILL.md` files with YAML frontmatter. Ask the agent to create new o
 
 ## Configuration
 
-| Variable                          | Default           | Description                          |
-| --------------------------------- | ----------------- | ------------------------------------ |
-| `TELEGRAM_BOT_TOKEN`              | —                 | Telegram bot token (required)        |
-| `TELEGRAM_CHAT_ID`                | —                 | Chat ID for cron/heartbeat output    |
-| `ANTHROPIC_API_KEY`               | —                 | API key (alternative to OAuth login) |
-| `WORKSPACE_DIR`                   | `./workspace`     | Workspace root                       |
-| `HEARTBEAT_INTERVAL_MINUTES`      | `30`              | Minutes between heartbeat checks     |
-| `HEARTBEAT_ACTIVE_START` / `_END` | `08:00` / `23:00` | Active hours window                  |
-| `OPENAI_API_KEY`                  | —                 | Enables semantic memory search       |
-| `LOG_LEVEL`                       | `info`            | `debug` / `info` / `warn` / `error`  |
+| Variable                          | Default           | Description                                          |
+| --------------------------------- | ----------------- | ---------------------------------------------------- |
+| `TELEGRAM_BOT_TOKEN`              | —                 | Telegram bot token (required)                        |
+| `TELEGRAM_CHAT_ID`                | —                 | Chat ID for cron/heartbeat output                    |
+| `ANTHROPIC_API_KEY`               | —                 | API key (alternative to OAuth login)                 |
+| `WORKSPACE_DIR`                   | `./workspace`     | Workspace root                                       |
+| `HEARTBEAT_INTERVAL_MINUTES`      | `30`              | Minutes between heartbeat checks                     |
+| `HEARTBEAT_ACTIVE_START` / `_END` | `08:00` / `23:00` | Active hours window                                  |
+| `OPENAI_API_KEY`                  | —                 | Semantic memory search + Whisper voice transcription |
+| `LOG_LEVEL`                       | `info`            | `debug` / `info` / `warn` / `error`                  |
 
 ## Docker
 
