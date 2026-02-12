@@ -1,6 +1,6 @@
 # USER.md - About Your Human
 
-*Learn about the person you're helping. Update this as you go.*
+_Learn about the person you're helping. Update this as you go._
 
 - **Name:**
 - **What to call them:**
@@ -10,4 +10,4 @@
 
 ## Context
 
-*(What do they care about? What projects are they working on? Build this over time.)*
+_(What do they care about? What projects are they working on? Build this over time.)_

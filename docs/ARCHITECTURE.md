@@ -35,7 +35,7 @@ Jeeves is a personal AI assistant that lives in Telegram. A user sends a message
 │      ▼                ▼                  ▼                 │
 │ ┌──────────┐  ┌────────────┐  ┌────────────────────┐      │
 │ │   LLM    │  │   Tools    │  │   Session Store    │      │
-│ │(src/llm) │  │ (6 tools)  │  │  (src/session.ts)  │      │
+│ │(src/llm) │  │  Tools     │  │  (src/session.ts)  │      │
 │ └──────────┘  └──────┬─────┘  └────────┬───────────┘      │
 │                      │                 │                   │
 │                      ▼                 ▼                   │
@@ -88,7 +88,7 @@ interface AgentContext {
   sessionStore: SessionStore;
   sessionKey: string;
   memoryIndex: MemoryIndex;
-  callLLM?: typeof callLLM;   // injectable for testing
+  callLLM?: typeof callLLM; // injectable for testing
 }
 ```
 
@@ -104,21 +104,23 @@ Wraps `@anthropic-ai/sdk` with streaming. Supports two auth modes:
 The stealth layer (`src/auth/stealth.ts`) handles:
 
 - Custom HTTP headers mimicking Claude Code's user-agent and beta flags
-- Tool name remapping: `bash` -> `Bash`, `read` -> `Read`, `webfetch` -> `WebFetch`
+- Tool name remapping: `bash` -> `Bash`, `read` -> `Read`, `web_fetch` -> `WebFetch`
 - A system prompt prefix identifying as Claude Code
 
 ## Tools
 
-Six tools, all registered via `allTools()` in `src/tools/index.ts`:
+All tools registered via `allTools()` in `src/tools/index.ts`:
 
-| Tool            | File                      | Factory                                | Description                                                                                                                               |
-| --------------- | ------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `bash`          | `tools/bash.ts`           | `createBashTool(workspaceDir)`         | Shell command execution via `Bun.spawnSync`. Commands run in workspace dir with configurable timeout.                                     |
-| `read`          | `tools/read-file.ts`      | `createReadFileTool(workspaceDir)`     | Read file contents with line numbers. Relative paths resolve from workspace.                                                              |
-| `write`         | `tools/write-file.ts`     | `createWriteFileTool(workspaceDir)`    | Write content to files, creating parent directories as needed.                                                                            |
-| `webfetch`      | `tools/web-fetch.ts`      | `webFetchTool` (singleton)             | Fetch URLs, extract readable content using `@mozilla/readability` + `linkedom`. Non-HTML returned raw. Content truncated at 10,000 chars. |
-| `cron`          | `tools/cron.ts`           | `createCronTool(scheduler)`            | Manage scheduled jobs: add/list/remove/run/status.                                                                                        |
-| `memory_search` | `tools/memory-search.ts`  | `createMemorySearchTool(memoryIndex)`  | Hybrid search over long-term memory files and past session transcripts. Semantic + keyword with `OPENAI_API_KEY`, keyword-only without. |
+| Tool            | File                     | Factory                               | Description                                                                                                                               |
+| --------------- | ------------------------ | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `bash`          | `tools/bash.ts`          | `createBashTool(workspaceDir)`        | Shell command execution via `Bun.spawnSync`. Commands run in workspace dir with configurable timeout.                                     |
+| `read`          | `tools/read-file.ts`     | `createReadFileTool(workspaceDir)`    | Read file contents with line numbers. Relative paths resolve from workspace.                                                              |
+| `write`         | `tools/write-file.ts`    | `createWriteFileTool(workspaceDir)`   | Write content to files, creating parent directories as needed.                                                                            |
+| `edit`          | `tools/edit-file.ts`     | `createEditFileTool(workspaceDir)`    | Find-and-replace file editing. Matches a unique string in a file and replaces it.                                                         |
+| `web_fetch`     | `tools/web-fetch.ts`     | `webFetchTool` (singleton)            | Fetch URLs, extract readable content using `@mozilla/readability` + `linkedom`. Non-HTML returned raw. Content truncated at 10,000 chars. |
+| `web_search`    | `tools/web-search.ts`    | `webSearchTool` (singleton)           | DuckDuckGo web search. Returns search results with titles, URLs, and snippets.                                                            |
+| `cron`          | `tools/cron.ts`          | `createCronTool(scheduler)`           | Manage scheduled jobs: add/list/remove/run/status.                                                                                        |
+| `memory_search` | `tools/memory-search.ts` | `createMemorySearchTool(memoryIndex)` | Hybrid search over long-term memory files and past session transcripts. Semantic + keyword with `OPENAI_API_KEY`, keyword-only without.   |
 
 All tools implement the `Tool` interface:
 
@@ -339,11 +341,24 @@ Skills are listed in the system prompt as XML blocks. The agent reads the full `
 
 Built on grammY with long polling. Provides:
 
-- **Message handling**: receives text messages, routes through agent mutex, sends formatted replies
+- **Message handling**: receives text messages, photos, voice notes, and audio files; routes through agent mutex, sends formatted replies
 - **Markdown -> Telegram HTML**: converts markdown to Telegram's subset of HTML (bold, italic, code, links, headers)
 - **Message splitting**: chunks messages at Telegram's 4096-char limit, preferring newline > space > hard split
 - **Progress updates**: shows typing indicator and status messages ("Thinking...", "Running command") during agent runs, suppressed for the first 5 seconds
 - **Per-chat mutex**: prevents concurrent agent runs for the same chat
+
+### Message Input Pipeline
+
+Each Telegram message type is normalized before reaching the agent loop:
+
+| Type          | Handler                          | Sent to agent as                                                                                                   |
+| ------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Text          | `message:text`                   | Plain string                                                                                                       |
+| Photo         | `message:photo`                  | `LLMContentBlock[]` — base64 image (largest resolution) + caption text                                             |
+| Voice / Audio | `message:voice`, `message:audio` | Plain string — transcribed via OpenAI Whisper (`OPENAI_API_KEY` required) with `[Voice message transcript]` prefix |
+| Other         | `message` (fallback)             | Rejected with "unsupported message type" reply                                                                     |
+
+**Reply context**: When a message replies to another, `getReplyContext()` extracts the original text/caption (truncated to 300 chars) and prepends it as `[Replying to: ...]`.
 
 ## Logger (`src/logger.ts`)
 
@@ -364,7 +379,7 @@ Formats agent iteration progress for display in Telegram:
 2.  grammY handler receives it, acquires agent mutex
 3.  makeAgentContext() builds context with fresh skills + memoryIndex
 4.  runAgent() loads session history from disk (post-last-compaction-marker)
-5.  System prompt assembled: base identity + tools + skills + workspace files
+5.  System prompt assembled: base identity + skills + workspace files
 6.  Claude called with history + system prompt + tool definitions
 7.  Claude responds: tool_use[bash("curl wttr.in")]
 8.  bash tool executes the command, returns stdout

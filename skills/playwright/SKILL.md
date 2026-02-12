@@ -153,6 +153,7 @@ webfetch https://github.com/microsoft/playwright-python
 3. **Dynamic content**: Add `page.wait_for_timeout(ms)` for slow-rendering JS
 
 Use this when the built-in `webfetch` tool encounters:
+
 - JavaScript-only content
 - Dynamic loading
 - Complex single-page applications

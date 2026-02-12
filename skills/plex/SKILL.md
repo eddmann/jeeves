@@ -111,6 +111,7 @@ EOF
 ```
 
 **Key details about the OAuth flow:**
+
 - `MyPlexPinLogin.run()` generates a NEW pin and starts a blocking thread — don't use it for two-step auth
 - `MyPlexPinLogin.pin` raises `BadRequest` when `oauth=True` — don't access it
 - Use `_getCode()` to generate the PIN without starting the polling thread
@@ -179,74 +180,74 @@ EOF
 
 ### Server Methods
 
-| Method | Returns | Description |
-|--------|---------|-------------|
-| `plex.library.sections()` | list[LibrarySection] | All library sections |
-| `plex.library.section(name)` | LibrarySection | Get section by title |
-| `plex.library.sectionByID(id)` | LibrarySection | Get section by ID |
-| `plex.library.onDeck()` | list[Media] | On deck items |
-| `plex.library.recentlyAdded()` | list[Media] | Recently added across all sections |
-| `plex.continueWatching()` | list[Media] | Continue watching hub |
-| `plex.history(maxresults=N)` | list[Media] | Watch history |
+| Method                         | Returns              | Description                        |
+| ------------------------------ | -------------------- | ---------------------------------- |
+| `plex.library.sections()`      | list[LibrarySection] | All library sections               |
+| `plex.library.section(name)`   | LibrarySection       | Get section by title               |
+| `plex.library.sectionByID(id)` | LibrarySection       | Get section by ID                  |
+| `plex.library.onDeck()`        | list[Media]          | On deck items                      |
+| `plex.library.recentlyAdded()` | list[Media]          | Recently added across all sections |
+| `plex.continueWatching()`      | list[Media]          | Continue watching hub              |
+| `plex.history(maxresults=N)`   | list[Media]          | Watch history                      |
 
 ### Section Methods
 
-| Method | Returns | Description |
-|--------|---------|-------------|
-| `section.all()` | list[Media] | All items in section |
-| `section.search(title, **filters)` | list[Media] | Search with filters |
-| `section.recentlyAdded()` | list[Media] | Recently added to section |
-| `section.onDeck()` | list[Media] | On deck for section |
+| Method                             | Returns     | Description               |
+| ---------------------------------- | ----------- | ------------------------- |
+| `section.all()`                    | list[Media] | All items in section      |
+| `section.search(title, **filters)` | list[Media] | Search with filters       |
+| `section.recentlyAdded()`          | list[Media] | Recently added to section |
+| `section.onDeck()`                 | list[Media] | On deck for section       |
 
 ### Media Fields (Movie)
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `title` | str | Movie title |
-| `year` | int | Release year |
-| `duration` | int | Duration in milliseconds |
-| `rating` | float | Critic rating |
-| `audienceRating` | float | Audience rating (Rotten Tomatoes) |
-| `contentRating` | str | Content rating (PG-13, R, etc.) |
-| `summary` | str | Plot summary |
-| `genres` | list[Genre] | Genre tags (access `.tag`) |
-| `directors` | list[Director] | Directors (access `.tag`) |
-| `roles` | list[Role] | Cast members (access `.tag`) |
-| `studio` | str | Production studio |
-| `addedAt` | datetime | When added to library |
-| `lastViewedAt` | datetime | Last watched (None if unwatched) |
-| `viewCount` | int | Times watched |
+| Field            | Type           | Description                       |
+| ---------------- | -------------- | --------------------------------- |
+| `title`          | str            | Movie title                       |
+| `year`           | int            | Release year                      |
+| `duration`       | int            | Duration in milliseconds          |
+| `rating`         | float          | Critic rating                     |
+| `audienceRating` | float          | Audience rating (Rotten Tomatoes) |
+| `contentRating`  | str            | Content rating (PG-13, R, etc.)   |
+| `summary`        | str            | Plot summary                      |
+| `genres`         | list[Genre]    | Genre tags (access `.tag`)        |
+| `directors`      | list[Director] | Directors (access `.tag`)         |
+| `roles`          | list[Role]     | Cast members (access `.tag`)      |
+| `studio`         | str            | Production studio                 |
+| `addedAt`        | datetime       | When added to library             |
+| `lastViewedAt`   | datetime       | Last watched (None if unwatched)  |
+| `viewCount`      | int            | Times watched                     |
 
 ### Media Fields (Show)
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `title` | str | Show title |
-| `year` | int | First aired year |
-| `childCount` | int | Number of seasons |
-| `leafCount` | int | Total episodes |
-| `viewedLeafCount` | int | Watched episodes |
-| `duration` | int | Typical episode duration (ms) |
+| Field             | Type | Description                   |
+| ----------------- | ---- | ----------------------------- |
+| `title`           | str  | Show title                    |
+| `year`            | int  | First aired year              |
+| `childCount`      | int  | Number of seasons             |
+| `leafCount`       | int  | Total episodes                |
+| `viewedLeafCount` | int  | Watched episodes              |
+| `duration`        | int  | Typical episode duration (ms) |
 
 ### Media Fields (Episode)
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `title` | str | Episode title |
-| `grandparentTitle` | str | Show name |
-| `parentTitle` | str | Season name |
-| `parentIndex` | int | Season number |
-| `index` | int | Episode number |
-| `duration` | int | Duration in milliseconds |
+| Field              | Type | Description              |
+| ------------------ | ---- | ------------------------ |
+| `title`            | str  | Episode title            |
+| `grandparentTitle` | str  | Show name                |
+| `parentTitle`      | str  | Season name              |
+| `parentIndex`      | int  | Season number            |
+| `index`            | int  | Episode number           |
+| `duration`         | int  | Duration in milliseconds |
 
 ### Navigation (Shows)
 
-| Method | Returns | Description |
-|--------|---------|-------------|
-| `show.seasons()` | list[Season] | All seasons |
-| `show.episodes()` | list[Episode] | All episodes |
-| `show.episode(season=N, episode=M)` | Episode | Specific episode |
-| `season.episodes()` | list[Episode] | Episodes in season |
+| Method                              | Returns       | Description        |
+| ----------------------------------- | ------------- | ------------------ |
+| `show.seasons()`                    | list[Season]  | All seasons        |
+| `show.episodes()`                   | list[Episode] | All episodes       |
+| `show.episode(season=N, episode=M)` | Episode       | Specific episode   |
+| `season.episodes()`                 | list[Episode] | Episodes in season |
 
 ## Examples
 

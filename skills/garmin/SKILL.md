@@ -104,23 +104,23 @@ EOF
 
 ### Health Methods
 
-| Method | Description |
-|--------|-------------|
-| `get_stats(date)` | Daily summary (steps, calories, HR, stress durations) |
-| `get_sleep_data(date)` | Sleep stages and scores |
-| `get_heart_rates(date)` | Heart rate summary |
-| `get_hrv_data(date)` | Heart rate variability |
-| `get_stress_data(date)` | Stress levels (avg/max only, durations in get_stats) |
-| `get_body_battery(start, end)` | Body battery readings |
+| Method                         | Description                                           |
+| ------------------------------ | ----------------------------------------------------- |
+| `get_stats(date)`              | Daily summary (steps, calories, HR, stress durations) |
+| `get_sleep_data(date)`         | Sleep stages and scores                               |
+| `get_heart_rates(date)`        | Heart rate summary                                    |
+| `get_hrv_data(date)`           | Heart rate variability                                |
+| `get_stress_data(date)`        | Stress levels (avg/max only, durations in get_stats)  |
+| `get_body_battery(start, end)` | Body battery readings                                 |
 
 ### Activity Methods
 
-| Method | Description |
-|--------|-------------|
-| `get_activities(start, limit)` | List recent activities |
-| `get_activities_by_date(start, end)` | Activities in date range |
-| `get_activity(id)` | Single activity details |
-| `get_training_status(date)` | Training load and VO2 max |
+| Method                               | Description               |
+| ------------------------------------ | ------------------------- |
+| `get_activities(start, limit)`       | List recent activities    |
+| `get_activities_by_date(start, end)` | Activities in date range  |
+| `get_activity(id)`                   | Single activity details   |
+| `get_training_status(date)`          | Training load and VO2 max |
 
 **Note:** All dates use `"YYYY-MM-DD"` string format.
 

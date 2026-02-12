@@ -52,6 +52,7 @@ EOF
 ```
 
 Send the URL to the user as a clickable link. Tell them:
+
 1. Click the link and authorize the app
 2. The browser will redirect to a page that won't load (localhost) — **that's expected**
 3. Copy the **full URL** from the browser address bar and paste it back here
@@ -137,34 +138,35 @@ EOF
 
 ### Client Methods
 
-| Method | Returns | Description |
-|--------|---------|-------------|
-| `client.get_athlete()` | Athlete | Current user's profile |
-| `client.get_athlete_stats(athlete_id)` | AthleteStats | Aggregated statistics |
-| `client.get_activities(limit=N, after=date, before=date)` | Iterator[SummaryActivity] | List activities |
-| `client.get_activity(activity_id)` | DetailedActivity | Single activity with full details |
+| Method                                                    | Returns                   | Description                       |
+| --------------------------------------------------------- | ------------------------- | --------------------------------- |
+| `client.get_athlete()`                                    | Athlete                   | Current user's profile            |
+| `client.get_athlete_stats(athlete_id)`                    | AthleteStats              | Aggregated statistics             |
+| `client.get_activities(limit=N, after=date, before=date)` | Iterator[SummaryActivity] | List activities                   |
+| `client.get_activity(activity_id)`                        | DetailedActivity          | Single activity with full details |
 
 ### Activity Fields (SummaryActivity)
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | int | Activity ID |
-| `name` | str | Activity name |
-| `type` | str | "Run", "Ride", "Swim", etc. |
-| `sport_type` | str | More specific type (e.g., "TrailRun") |
-| `distance` | Distance | Meters (use `float()` to convert) |
-| `moving_time` | Duration | Seconds as int (use `.timedelta()` for timedelta) |
-| `elapsed_time` | Duration | Seconds as int |
-| `total_elevation_gain` | Distance | Meters climbed |
-| `average_speed` / `max_speed` | Velocity | m/s |
-| `average_heartrate` / `max_heartrate` | float/None | bpm (if recorded) |
-| `start_date_local` | datetime | Local time |
+| Field                                 | Type       | Description                                       |
+| ------------------------------------- | ---------- | ------------------------------------------------- |
+| `id`                                  | int        | Activity ID                                       |
+| `name`                                | str        | Activity name                                     |
+| `type`                                | str        | "Run", "Ride", "Swim", etc.                       |
+| `sport_type`                          | str        | More specific type (e.g., "TrailRun")             |
+| `distance`                            | Distance   | Meters (use `float()` to convert)                 |
+| `moving_time`                         | Duration   | Seconds as int (use `.timedelta()` for timedelta) |
+| `elapsed_time`                        | Duration   | Seconds as int                                    |
+| `total_elevation_gain`                | Distance   | Meters climbed                                    |
+| `average_speed` / `max_speed`         | Velocity   | m/s                                               |
+| `average_heartrate` / `max_heartrate` | float/None | bpm (if recorded)                                 |
+| `start_date_local`                    | datetime   | Local time                                        |
 
 DetailedActivity adds: `calories`, `description`, `laps`, `splits_metric`, `segment_efforts`
 
 ### AthleteStats
 
 Access via `client.get_athlete_stats(tokens["athlete_id"])`:
+
 - `ytd_run_totals`, `ytd_ride_totals` - Year-to-date
 - `all_run_totals`, `all_ride_totals` - All-time
 - `recent_run_totals`, `recent_ride_totals` - Last 4 weeks

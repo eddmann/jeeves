@@ -18,15 +18,15 @@ Workspace directory (`./workspace`) is created on first run from `src/workspace/
 
 ## Common Commands
 
-| Task | Command |
-|------|---------|
+| Task          | Command      |
+| ------------- | ------------ |
 | Install + run | `make start` |
-| Dev | `make dev` |
-| Build | `make build` |
-| Test | `make test` |
-| Lint | `make lint` |
-| Format | `make fmt` |
-| Auth login | `make login` |
+| Dev           | `make dev`   |
+| Build         | `make build` |
+| Test          | `make test`  |
+| Lint          | `make lint`  |
+| Format        | `make fmt`   |
+| Auth login    | `make login` |
 
 Run `make help` for the full list of targets.
 
@@ -55,33 +55,17 @@ src/session.ts           → JSONL session store (append-only, compaction marker
 src/logger.ts            → JSONL structured logger (daily rotating)
 src/heartbeat.ts         → periodic agent check-ins with dedup + active hours
 src/progress.ts          → progress update formatting for Telegram
-src/auth/storage.ts      → auth.json credential storage + auto-refresh
-src/auth/oauth.ts        → OAuth PKCE flow
-src/auth/stealth.ts      → tool name remapping + headers for OAuth mode
 src/transcribe.ts        → OpenAI Whisper audio transcription wrapper
-src/channel/telegram.ts  → grammY bot, markdown→HTML, message splitting, photo/voice/audio handlers
-src/tools/index.ts       → tool registry (Tool interface)
-src/tools/bash.ts        → shell execution (Bun.spawn, 30s timeout)
-src/tools/read-file.ts   → file reading with line numbers
-src/tools/write-file.ts  → file writing with auto-mkdir
-src/tools/edit-file.ts   → find-and-replace file editing
-src/tools/web-fetch.ts   → HTTP fetch + Readability extraction (10k char limit)
-src/tools/web-search.ts  → DuckDuckGo web search
-src/tools/cron.ts        → cron job scheduling tool
-src/tools/memory-search.ts → semantic search over memory and session transcripts
-src/cron/scheduler.ts    → cron job runner with setTimeout timer
-src/cron/store.ts        → cron job JSONL persistence
-src/memory/index.ts      → SQLite-backed memory index (vector + FTS5 hybrid search)
-src/memory/compaction.ts → token-based session compaction with LLM summarization
-src/memory/embeddings.ts → OpenAI text-embedding-3-small wrapper
-src/memory/hybrid.ts     → hybrid search ranking (cosine + BM25 merge)
-src/workspace/loader.ts  → convention file loading, workspace init, .env loading
-src/workspace/prompt.ts  → system prompt builder
-src/skills/loader.ts     → SKILL.md discovery (YAML frontmatter, recursive)
-src/skills/prompt.ts     → format skills for system prompt
+src/auth/                → OAuth PKCE, token storage + auto-refresh, stealth mode
+src/channel/telegram.ts  → grammY bot, markdown→HTML, message splitting, photo/voice/audio
+src/tools/               → tool implementations (see tool list below)
+src/cron/                → cron scheduler + JSONL job persistence
+src/memory/              → SQLite memory index (vector + FTS5), compaction, embeddings
+src/workspace/           → convention file loading, workspace init, system prompt builder
+src/skills/              → SKILL.md discovery + system prompt formatting
 ```
 
-Eight agent tools: `bash`, `read` (read_file), `write` (write_file), `edit` (edit_file), `webfetch` (web_fetch), `web_search`, `cron`, `memory_search`. All scoped to workspace directory.
+Agent tools: `bash`, `read` (read_file), `write` (write_file), `edit` (edit_file), `web_fetch`, `web_search`, `cron`, `memory_search`. All scoped to workspace directory. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed system design.
 
 ### Skills
 
@@ -94,35 +78,24 @@ Loaded from `workspace/` into system prompt: `AGENTS.md`, `SOUL.md`, `IDENTITY.m
 ## Tests & CI
 
 - **Framework:** Bun's built-in test runner (`bun:test`)
-- **Location:** `tests/*.test.ts`
-- **Helpers:** `tests/helpers/` — `factories.ts` (builders), `stub-auth.ts` (fake auth), `temp-dir.ts` (temp dir lifecycle)
+- **Location:** `tests/*.test.ts`, helpers in `tests/helpers/`
 - **Philosophy:** Classical (Detroit) school — behavior-focused, real objects over mocks, AAA pattern
 - **Mocking:** `setSystemTime()` for clock, global `fetch` replacement, dependency injection for `callLLM`
-- **Gotcha:** `setSystemTime()` mocks `Date.now()`/`new Date()` but NOT `setTimeout`/`setInterval`
 - **CI:** GitHub Actions runs `make can-release` (lint + test) on push
 
-### Test factories
-
-```typescript
-buildLLMResponse(), buildStubTool(), buildSkill(), buildWorkspaceFile(), buildCronJob()
-buildUserMessage(), buildAssistantMessage(), buildToolUseMessage(), buildToolResultMessage()
-```
+See [docs/TESTING.md](docs/TESTING.md) for test factories, helpers, and detailed conventions.
 
 ## PR & Workflow Rules
 
-- Single `main` branch, origin remote at github.com/eddmann/jeeves
+- Single `main` branch, origin remote at github.com/eddmann/jeeves — direct commits, no PRs
 - Commit style: conventional commits (`feat:`, `refactor:`, `fix:`)
-- No PR process, no branch protection, no CODEOWNERS
-- Personal project — direct commits to main
 
 ## Security & Gotchas
 
 - **Never commit:** `.env`, `auth.json`, `workspace/` (all gitignored)
-- **auth.json** stores OAuth tokens with mode `0o600` — handled by `src/auth/storage.ts`
-- **Extensionless imports** — `./foo` not `./foo.ts` — requires `moduleResolution: "bundler"` in tsconfig
 - **OAuth stealth mode** remaps tool names via `src/auth/stealth.ts` — don't rename tools without updating the mapping
 - **Agent mutex** (`withAgentLock` in `src/agent-lock.ts`) serializes all agent runs (Telegram, cron, heartbeat) — long tool executions block everything
 - **Session compaction** repairs orphaned `tool_result` blocks and summarizes old messages via LLM — some tool context may be lost after compaction
 - **`workspace/`** is gitignored runtime state — templates seeded from `src/workspace/templates/` on first run
-- **Heartbeat** deduplicates identical responses within 24h and suppresses `HEARTBEAT_OK` replies
 - **`runAgent`** mutates the `history` array in place — if capturing messages in tests, capture `.length` not the array reference
+- **`setSystemTime()`** mocks `Date.now()`/`new Date()` but NOT `setTimeout`/`setInterval`
