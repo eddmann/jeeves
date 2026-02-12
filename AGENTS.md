@@ -58,7 +58,8 @@ src/progress.ts          → progress update formatting for Telegram
 src/auth/storage.ts      → auth.json credential storage + auto-refresh
 src/auth/oauth.ts        → OAuth PKCE flow
 src/auth/stealth.ts      → tool name remapping + headers for OAuth mode
-src/channel/telegram.ts  → grammY bot, markdown→HTML, message splitting
+src/transcribe.ts        → OpenAI Whisper audio transcription wrapper
+src/channel/telegram.ts  → grammY bot, markdown→HTML, message splitting, photo/voice/audio handlers
 src/tools/index.ts       → tool registry (Tool interface)
 src/tools/bash.ts        → shell execution (Bun.spawn, 30s timeout)
 src/tools/read-file.ts   → file reading with line numbers

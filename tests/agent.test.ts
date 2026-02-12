@@ -1,9 +1,9 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { runAgent, MAX_ITERATIONS, type AgentContext } from "../src/agent";
+import { runAgent, MAX_ITERATIONS, sanitizeForPersist, type AgentContext } from "../src/agent";
 import { SessionStore } from "../src/session";
 import { buildSystemPrompt } from "../src/workspace/prompt";
 import { formatSkillsForPrompt } from "../src/skills/prompt";
-import type { LLMResponse } from "../src/llm";
+import type { LLMResponse, LLMContentBlock, LLMMessage } from "../src/llm";
 import type { ProgressUpdate } from "../src/progress";
 import { createTempDir, cleanupTempDir } from "./helpers/temp-dir";
 import {
@@ -330,6 +330,126 @@ describe("agent loop", () => {
 
     expect(result).toBe("Here's what I found");
     expect(tool.calls.length).toBe(1);
+  });
+
+  test("accepts LLMContentBlock[] as userMessage with image blocks", async () => {
+    let receivedMessageCount = 0;
+    let hadImageBlock = false;
+    const ctx: AgentContext = {
+      authStorage: buildStubAuth(),
+      tools: [],
+      skills: [],
+      workspaceFiles: [],
+      sessionStore: new SessionStore(tmpDir),
+      sessionKey: "test-session",
+      memoryIndex,
+      callLLM: async (opts) => {
+        receivedMessageCount = opts.messages.length;
+        // Check if any message contains an image block
+        for (const msg of opts.messages) {
+          if (typeof msg.content === "string") continue;
+          if (msg.content.some((b) => b.type === "image")) hadImageBlock = true;
+        }
+        return buildLLMResponse({ text: "I see the image" });
+      },
+    };
+
+    const content: LLMContentBlock[] = [
+      {
+        type: "image",
+        source: { type: "base64", media_type: "image/jpeg", data: "abc123" },
+      },
+      { type: "text", text: "What is this?" },
+    ];
+
+    const result = await runAgent(ctx, content);
+
+    expect(result).toBe("I see the image");
+    expect(receivedMessageCount).toBe(1);
+    expect(hadImageBlock).toBe(true);
+  });
+
+  test("sanitizes image blocks before persisting to session", async () => {
+    const sessionStore = new SessionStore(tmpDir);
+    const ctx: AgentContext = {
+      authStorage: buildStubAuth(),
+      tools: [],
+      skills: [],
+      workspaceFiles: [],
+      sessionStore,
+      sessionKey: "sanitize-session",
+      memoryIndex,
+      callLLM: async () => buildLLMResponse({ text: "ok" }),
+    };
+
+    const content: LLMContentBlock[] = [
+      {
+        type: "image",
+        source: { type: "base64", media_type: "image/jpeg", data: "huge-base64-data" },
+      },
+      { type: "text", text: "describe this" },
+    ];
+
+    await runAgent(ctx, content);
+
+    // Read back persisted session — image blocks should be replaced with [Image]
+    const saved = sessionStore.get("sanitize-session");
+    for (const msg of saved) {
+      if (typeof msg.content === "string") continue;
+      for (const block of msg.content) {
+        expect(block.type).not.toBe("image");
+      }
+    }
+    // Verify the [Image] placeholder is present
+    const userMsg = saved.find((m) => m.role === "user" && Array.isArray(m.content));
+    expect(userMsg).toBeDefined();
+    const textBlocks = (userMsg!.content as LLMContentBlock[]).filter((b) => b.type === "text");
+    expect(textBlocks.some((b) => (b as { text: string }).text === "[Image]")).toBe(true);
+  });
+});
+
+describe("sanitizeForPersist", () => {
+  test("replaces image blocks with [Image] text blocks", () => {
+    const messages: LLMMessage[] = [
+      {
+        role: "user",
+        content: [
+          {
+            type: "image",
+            source: { type: "base64", media_type: "image/jpeg", data: "abc" },
+          },
+          { type: "text", text: "caption" },
+        ],
+      },
+    ];
+
+    const result = sanitizeForPersist(messages);
+
+    const blocks = result[0].content as LLMContentBlock[];
+    expect(blocks[0]).toEqual({ type: "text", text: "[Image]" });
+    expect(blocks[1]).toEqual({ type: "text", text: "caption" });
+  });
+
+  test("passes through string content unchanged", () => {
+    const messages: LLMMessage[] = [{ role: "user", content: "hello" }];
+
+    const result = sanitizeForPersist(messages);
+
+    expect(result[0].content).toBe("hello");
+  });
+
+  test("passes through non-image blocks unchanged", () => {
+    const messages: LLMMessage[] = [
+      {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }],
+      },
+    ];
+
+    const result = sanitizeForPersist(messages);
+
+    const blocks = result[0].content as LLMContentBlock[];
+    expect(blocks[0].type).toBe("tool_result");
   });
 });
 

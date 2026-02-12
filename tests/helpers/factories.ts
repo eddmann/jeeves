@@ -1,4 +1,4 @@
-import type { LLMResponse } from "../../src/llm";
+import type { LLMResponse, LLMMessage } from "../../src/llm";
 import type { Skill } from "../../src/skills/loader";
 import type { WorkspaceFile } from "../../src/workspace/loader";
 import type { CronJob } from "../../src/cron/store";

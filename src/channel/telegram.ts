@@ -2,10 +2,12 @@
  * Telegram channel using grammY with long polling.
  */
 
-import { Bot } from "grammy";
+import { Bot, type Context } from "grammy";
 import { run, type RunnerHandle } from "@grammyjs/runner";
 import { log, formatError } from "../logger";
 import { formatProgress, type ProgressUpdate } from "../progress";
+import type { LLMContentBlock } from "../llm";
+import type { TranscribeFn } from "../transcribe";
 
 export interface Channel {
   start(): Promise<void>;
@@ -79,9 +81,10 @@ export function createTelegramChannel(opts: {
   token: string;
   onMessage: (
     chatId: string,
-    text: string,
+    content: string | LLMContentBlock[],
     onProgress: (u: ProgressUpdate) => Promise<void>,
   ) => Promise<string>;
+  transcribe?: TranscribeFn;
 }): Channel {
   const bot = new Bot(opts.token);
 
@@ -119,10 +122,22 @@ export function createTelegramChannel(opts: {
     }
   }
 
-  bot.on("message:text", async (ctx) => {
-    const chatId = ctx.chat.id.toString();
-    const text = ctx.message.text;
-    log.info("telegram", "Message received", { chatId, preview: text.slice(0, 100) });
+  async function downloadFile(fileId: string): Promise<Buffer> {
+    const file = await bot.api.getFile(fileId);
+    const url = `https://api.telegram.org/file/bot${opts.token}/${file.file_path}`;
+    const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+    return Buffer.from(await response.arrayBuffer());
+  }
+
+  // Shared handler for all incoming message types
+  async function handleIncoming(
+    ctx: Context,
+    content: string | LLMContentBlock[],
+    logPreview: string,
+  ): Promise<void> {
+    const chatId = ctx.chat!.id.toString();
+    log.info("telegram", "Message received", { chatId, preview: logPreview });
 
     // Acknowledge receipt if the agent is already busy on this chat
     if (chatLocks.has(chatId)) {
@@ -142,7 +157,7 @@ export function createTelegramChannel(opts: {
       let statusMessageId: number | null = null;
       let lastEditTime = 0;
       const progressStart = Date.now();
-      const numericChatId = ctx.chat.id;
+      const numericChatId = ctx.chat!.id;
 
       const onProgress = async (update: ProgressUpdate): Promise<void> => {
         const now = Date.now();
@@ -163,7 +178,7 @@ export function createTelegramChannel(opts: {
       };
 
       try {
-        const response = await opts.onMessage(chatId, text, onProgress);
+        const response = await opts.onMessage(chatId, content, onProgress);
         clearInterval(typingInterval);
 
         // Delete status message
@@ -202,6 +217,62 @@ export function createTelegramChannel(opts: {
         await ctx.reply(`Something went wrong: ${errMsg}`);
       }
     });
+  }
+
+  // Text messages
+  bot.on("message:text", (ctx) => {
+    return handleIncoming(ctx, ctx.message.text, ctx.message.text.slice(0, 100));
+  });
+
+  // Photo messages
+  bot.on("message:photo", async (ctx) => {
+    try {
+      const photos = ctx.message.photo;
+      const largest = photos[photos.length - 1];
+      const buffer = await downloadFile(largest.file_id);
+      const base64 = buffer.toString("base64");
+
+      const content: LLMContentBlock[] = [
+        {
+          type: "image",
+          source: { type: "base64", media_type: "image/jpeg", data: base64 },
+        },
+        { type: "text", text: ctx.message.caption || "The user sent this image." },
+      ];
+
+      return handleIncoming(ctx, content, ctx.message.caption?.slice(0, 100) || "[photo]");
+    } catch (err) {
+      log.error("telegram", "Failed to process photo", formatError(err));
+      await ctx.reply("Sorry, I couldn't process that image.");
+    }
+  });
+
+  // Voice and audio messages
+  bot.on(["message:voice", "message:audio"], async (ctx) => {
+    if (!opts.transcribe) {
+      await ctx.reply(
+        "Voice messages require an OpenAI API key for transcription. " +
+          "Set OPENAI_API_KEY in your .env file to enable this feature.",
+      );
+      return;
+    }
+
+    try {
+      const fileId = ctx.message.voice?.file_id ?? ctx.message.audio?.file_id;
+      if (!fileId) return;
+
+      const buffer = await downloadFile(fileId);
+      const filename = ctx.message.voice
+        ? "voice.ogg"
+        : (ctx.message.audio?.file_name ?? "audio.ogg");
+      const transcript = await opts.transcribe(buffer, filename);
+
+      const text = `[Voice message transcript]\n${transcript}`;
+      return handleIncoming(ctx, text, transcript.slice(0, 100));
+    } catch (err) {
+      log.error("telegram", "Failed to process voice message", formatError(err));
+      await ctx.reply("Sorry, I couldn't process that voice message.");
+    }
   });
 
   let handle: RunnerHandle | null = null;

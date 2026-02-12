@@ -20,6 +20,7 @@ export function estimateMessageTokens(msg: LLMMessage): number {
   } else {
     chars = msg.content.reduce((sum, block) => {
       if (block.type === "text") return sum + block.text.length;
+      if (block.type === "image") return sum + 1600 * 4; // ~1600 tokens, convert to chars
       if (block.type === "tool_result") return sum + block.content.length;
       if (block.type === "tool_use")
         return sum + JSON.stringify(block.input).length + block.name.length;
@@ -148,6 +149,7 @@ function formatMessagesForSummary(messages: LLMMessage[]): string {
       const textParts = msg.content
         .map((block) => {
           if (block.type === "text") return block.text;
+          if (block.type === "image") return "[Image]";
           if (block.type === "tool_use") return `[Tool: ${block.name}]`;
           if (block.type === "tool_result") {
             const preview = block.content.slice(0, 500);

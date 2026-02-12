@@ -28,14 +28,34 @@ export interface AgentContext {
   callLLM?: typeof callLLM;
 }
 
+/** Replace image blocks with placeholder text to avoid persisting base64 data. */
+export function sanitizeForPersist(messages: LLMMessage[]): LLMMessage[] {
+  return messages.map((msg) => {
+    if (typeof msg.content === "string") return msg;
+    const sanitized = msg.content.map((block) => {
+      if (block.type === "image") return { type: "text" as const, text: "[Image]" };
+      return block;
+    });
+    return { role: msg.role, content: sanitized };
+  });
+}
+
 export async function runAgent(
   ctx: AgentContext,
-  userMessage: string,
+  userMessage: string | LLMContentBlock[],
   onProgress?: (update: ProgressUpdate) => Promise<void>,
 ): Promise<string> {
+  const preview =
+    typeof userMessage === "string"
+      ? userMessage.slice(0, 100)
+      : userMessage
+          .filter((b): b is LLMContentBlock & { type: "text" } => b.type === "text")
+          .map((b) => b.text)
+          .join(" ")
+          .slice(0, 100) || "[media]";
   log.info("agent", "Processing message", {
     session: ctx.sessionKey,
-    preview: userMessage.slice(0, 100),
+    preview,
   });
 
   // Load working history (messages after last compaction marker)
@@ -130,7 +150,7 @@ export async function runAgent(
         continue;
       }
 
-      ctx.sessionStore.append(ctx.sessionKey, newMessages);
+      ctx.sessionStore.append(ctx.sessionKey, sanitizeForPersist(newMessages));
       return response.text;
     }
 
@@ -189,7 +209,7 @@ export async function runAgent(
       log.info("agent", "Compacting session", { totalTokens });
 
       // Append new messages first (preserves originals in the file)
-      ctx.sessionStore.append(ctx.sessionKey, newMessages);
+      ctx.sessionStore.append(ctx.sessionKey, sanitizeForPersist(newMessages));
       newMessages.length = 0;
 
       const result = await compactSession({
@@ -219,7 +239,7 @@ export async function runAgent(
   }
 
   // Max iterations reached
-  ctx.sessionStore.append(ctx.sessionKey, newMessages);
+  ctx.sessionStore.append(ctx.sessionKey, sanitizeForPersist(newMessages));
   log.warn("agent", "Max iterations reached", { max: MAX_ITERATIONS });
   return "(Agent reached maximum iterations)";
 }

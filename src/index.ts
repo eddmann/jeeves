@@ -17,6 +17,7 @@ import { createTelegramChannel } from "./channel/telegram";
 import { initLogger, log, formatError } from "./logger";
 import { MemoryIndex } from "./memory/index";
 import { createOpenAIEmbedder, createNoOpEmbedder } from "./memory/embeddings";
+import { createTranscriber } from "./transcribe";
 import { withAgentLock } from "./agent-lock";
 
 async function main() {
@@ -129,6 +130,7 @@ async function main() {
   );
   await memoryIndex.sync();
   await memoryIndex.indexSessionFiles(join(workspaceDir, "sessions"));
+  const transcribe = openaiKey ? createTranscriber(openaiKey) : undefined;
   log.info("startup", "Memory index initialized", {
     mode: openaiKey ? "semantic + keyword" : "keyword-only",
   });
@@ -172,10 +174,11 @@ async function main() {
   if (telegramToken) {
     channel = createTelegramChannel({
       token: telegramToken,
-      onMessage: async (msgChatId, text, onProgress) => {
+      transcribe,
+      onMessage: async (msgChatId, content, onProgress) => {
         return withAgentLock(async () => {
           const ctx = makeAgentContext(`telegram_${msgChatId}`);
-          return runAgent(ctx, text, onProgress);
+          return runAgent(ctx, content, onProgress);
         });
       },
     });

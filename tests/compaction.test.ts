@@ -12,7 +12,7 @@ import {
   RESERVE_FLOOR,
   SOFT_THRESHOLD,
 } from "../src/memory/compaction";
-import type { LLMMessage } from "../src/llm";
+import type { LLMMessage, LLMContentBlock } from "../src/llm";
 import {
   buildUserMessage,
   buildAssistantMessage,
@@ -48,6 +48,22 @@ describe("estimateMessageTokens", () => {
     const tokens = estimateMessageTokens(msg);
 
     expect(tokens).toBeGreaterThan(0);
+  });
+
+  test("estimates ~1600 tokens for an image block", () => {
+    const msg: LLMMessage = {
+      role: "user",
+      content: [
+        {
+          type: "image",
+          source: { type: "base64", media_type: "image/jpeg", data: "abc" },
+        } as LLMContentBlock,
+      ],
+    };
+    const tokens = estimateMessageTokens(msg);
+
+    // 1600 * 4 chars / 4 chars-per-token * 1.2 safety = 1920
+    expect(tokens).toBe(1920);
   });
 });
 
