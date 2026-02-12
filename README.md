@@ -10,7 +10,7 @@ Inspired by [OpenClaw](https://openclaw.ai/), I wanted to peel back what was und
 
 ## Quick Start
 
-The agent can read its own source, understand how it's built, and modify itself. Very meta.
+Jeeves can read his own source, understand how he's built, and modify himself. Very meta.
 
 **Docker (recommended):**
 
