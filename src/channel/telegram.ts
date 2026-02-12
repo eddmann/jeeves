@@ -77,6 +77,15 @@ export function splitMessage(text: string): string[] {
   return chunks;
 }
 
+function getReplyContext(replyMsg: unknown): string | null {
+  const msg = replyMsg as { text?: string; caption?: string } | undefined;
+  if (!msg) return null;
+  const text = msg.text ?? msg.caption;
+  if (!text) return null;
+  const preview = text.length > 300 ? text.slice(0, 300) + "..." : text;
+  return `[Replying to: ${preview}]`;
+}
+
 export function createTelegramChannel(opts: {
   token: string;
   onMessage: (
@@ -221,7 +230,9 @@ export function createTelegramChannel(opts: {
 
   // Text messages
   bot.on("message:text", (ctx) => {
-    return handleIncoming(ctx, ctx.message.text, ctx.message.text.slice(0, 100));
+    const reply = getReplyContext(ctx.message.reply_to_message);
+    const text = reply ? `${reply}\n\n${ctx.message.text}` : ctx.message.text;
+    return handleIncoming(ctx, text, ctx.message.text.slice(0, 100));
   });
 
   // Photo messages
@@ -232,7 +243,9 @@ export function createTelegramChannel(opts: {
       const buffer = await downloadFile(largest.file_id);
       const base64 = buffer.toString("base64");
 
+      const reply = getReplyContext(ctx.message.reply_to_message);
       const content: LLMContentBlock[] = [
+        ...(reply ? [{ type: "text" as const, text: reply }] : []),
         {
           type: "image",
           source: { type: "base64", media_type: "image/jpeg", data: base64 },
@@ -267,7 +280,9 @@ export function createTelegramChannel(opts: {
         : (ctx.message.audio?.file_name ?? "audio.ogg");
       const transcript = await opts.transcribe(buffer, filename);
 
-      const text = `[Voice message transcript]\n${transcript}`;
+      const reply = getReplyContext(ctx.message.reply_to_message);
+      const prefix = reply ? `${reply}\n\n` : "";
+      const text = `${prefix}[Voice message transcript]\n${transcript}`;
       return handleIncoming(ctx, text, transcript.slice(0, 100));
     } catch (err) {
       log.error("telegram", "Failed to process voice message", formatError(err));
