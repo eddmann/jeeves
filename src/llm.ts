@@ -3,7 +3,7 @@
  * Supports API key and OAuth (stealth) modes.
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import Anthropic, { type ClientOptions } from "@anthropic-ai/sdk";
 import type { AuthStorage } from "./auth/storage";
 import {
   getStealthHeaders,
@@ -64,8 +64,20 @@ export async function callLLM(opts: {
 
   const isOAuth = credential.type === "oauth";
 
-  // Build client
-  const clientOpts: Record<string, unknown> = {};
+  const clientOpts: ClientOptions = {
+    maxRetries: 5,
+    logLevel: log.level,
+    logger: {
+      error: (msg: string, ...args: unknown[]) =>
+        log.error("sdk", msg, args[0] as Record<string, unknown>),
+      warn: (msg: string, ...args: unknown[]) =>
+        log.warn("sdk", msg, args[0] as Record<string, unknown>),
+      info: (msg: string, ...args: unknown[]) =>
+        log.info("sdk", msg, args[0] as Record<string, unknown>),
+      debug: (msg: string, ...args: unknown[]) =>
+        log.debug("sdk", msg, args[0] as Record<string, unknown>),
+    },
+  };
   if (isOAuth) {
     clientOpts.apiKey = null;
     clientOpts.authToken = credential.accessToken;
@@ -75,14 +87,10 @@ export async function callLLM(opts: {
     clientOpts.apiKey = credential.key;
   }
 
-  const client = new Anthropic(clientOpts as ConstructorParameters<typeof Anthropic>[0]);
+  const client = new Anthropic(clientOpts);
 
   // Build system prompt with cache_control on the last block
-  const systemBlocks: Array<{
-    type: "text";
-    text: string;
-    cache_control?: { type: "ephemeral" };
-  }> = [];
+  const systemBlocks: Anthropic.TextBlockParam[] = [];
   if (isOAuth) {
     systemBlocks.push({ type: "text", text: getStealthSystemPrefix() });
   }
@@ -94,15 +102,10 @@ export async function callLLM(opts: {
   }
 
   // Remap tool names for OAuth mode, cache_control on last tool
-  const tools: Array<{
-    name: string;
-    description: string;
-    input_schema: Record<string, unknown>;
-    cache_control?: { type: "ephemeral" };
-  }> = opts.tools.map((t) => ({
+  const tools: Anthropic.Tool[] = opts.tools.map((t) => ({
     name: isOAuth ? toClaudeCodeToolName(t.name) : t.name,
     description: t.description,
-    input_schema: t.input_schema,
+    input_schema: t.input_schema as Anthropic.Tool.InputSchema,
   }));
   if (tools.length > 0) {
     tools[tools.length - 1].cache_control = { type: "ephemeral" };
@@ -140,7 +143,7 @@ export async function callLLM(opts: {
     max_tokens: 8192,
     system: systemBlocks,
     messages: messages as Anthropic.MessageParam[],
-    tools: tools as Anthropic.Tool[],
+    tools,
     stream: true,
   });
 
