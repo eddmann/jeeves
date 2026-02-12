@@ -275,6 +275,13 @@ export function createTelegramChannel(opts: {
     }
   });
 
+  // Fallback for unsupported message types
+  bot.on("message", async (ctx) => {
+    await ctx.reply(
+      "I can handle text, photos, and voice messages. " + "This message type isn't supported yet.",
+    );
+  });
+
   let handle: RunnerHandle | null = null;
 
   return {
