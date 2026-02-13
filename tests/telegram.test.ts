@@ -74,11 +74,7 @@ describe("markdown to Telegram HTML", () => {
   });
 
   test("preserves column alignment in table conversion", () => {
-    const md = [
-      "| A | BB |",
-      "|---|---|",
-      "| x | yy |",
-    ].join("\n");
+    const md = ["| A | BB |", "|---|---|", "| x | yy |"].join("\n");
 
     const result = markdownToTelegramHTML(md);
 
