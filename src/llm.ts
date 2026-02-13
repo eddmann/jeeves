@@ -130,6 +130,15 @@ export async function callLLM(opts: {
   // Add cache_control on the last message's last content block.
   // Without this, the 20-block lookback window can't reach the system/tools
   // cache breakpoints when conversations grow beyond ~20 messages.
+  // First strip any stale markers from prior callLLM iterations (the history
+  // array is mutated in place by the agent loop), then set the new one.
+  for (const m of messages) {
+    if (Array.isArray(m.content)) {
+      for (const block of m.content) {
+        if (block.cache_control) block.cache_control = undefined;
+      }
+    }
+  }
   if (messages.length > 0) {
     const last = messages[messages.length - 1];
     if (typeof last.content === "string") {
