@@ -55,6 +55,56 @@ describe("markdown to Telegram HTML", () => {
     expect(result).toContain("&gt;");
   });
 
+  test("converts markdown tables to aligned monospace pre blocks", () => {
+    const md = [
+      "| Month | Runs | km |",
+      "|-------|------|----|",
+      "| January | 13 | 186.5 |",
+      "| February | 3 | 36.2 |",
+    ].join("\n");
+
+    const result = markdownToTelegramHTML(md);
+
+    expect(result).toContain("<pre>");
+    expect(result).toContain("</pre>");
+    expect(result).not.toContain("|");
+    expect(result).toContain("Month");
+    expect(result).toContain("January");
+    expect(result).toContain("February");
+  });
+
+  test("preserves column alignment in table conversion", () => {
+    const md = [
+      "| A | BB |",
+      "|---|---|",
+      "| x | yy |",
+    ].join("\n");
+
+    const result = markdownToTelegramHTML(md);
+
+    // Header and data rows should be padded to same widths
+    expect(result).toContain("A  BB");
+    expect(result).toContain("x  yy");
+  });
+
+  test("converts table embedded in surrounding text", () => {
+    const md = [
+      "Here are the stats:",
+      "",
+      "| A | B |",
+      "|---|---|",
+      "| 1 | 2 |",
+      "",
+      "Pretty good!",
+    ].join("\n");
+
+    const result = markdownToTelegramHTML(md);
+
+    expect(result).toContain("Here are the stats:");
+    expect(result).toContain("<pre>");
+    expect(result).toContain("Pretty good!");
+  });
+
   test("handles mixed formatting in a single message", () => {
     const md = "**bold** and *italic* and `code`";
 

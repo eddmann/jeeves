@@ -30,6 +30,30 @@ export function markdownToTelegramHTML(md: string): string {
   // Code blocks: ```lang\n...\n``` → <pre>...</pre>
   text = text.replace(/```(?:\w*)\n([\s\S]*?)```/g, (_m, code) => `<pre>${code.trim()}</pre>`);
 
+  // Markdown tables → aligned monospace <pre> blocks
+  text = text.replace(
+    /((?:^|\n)\|[^\n]+\|(?:\n\|[^\n]+\|)*)/g,
+    (tableBlock) => {
+      const rows = tableBlock.trim().split("\n");
+      // Filter out separator rows (|---|---|)
+      const dataRows = rows.filter((r) => !/^\|[\s-:|]+\|$/.test(r));
+      if (dataRows.length === 0) return tableBlock;
+      // Parse cells
+      const parsed = dataRows.map((r) =>
+        r.split("|").slice(1, -1).map((c) => c.trim()),
+      );
+      // Calculate column widths
+      const colWidths = parsed[0].map((_, ci) =>
+        Math.max(...parsed.map((row) => (row[ci] ?? "").length)),
+      );
+      // Format rows with padding
+      const formatted = parsed.map((row) =>
+        row.map((cell, ci) => cell.padEnd(colWidths[ci])).join("  "),
+      );
+      return `\n<pre>${formatted.join("\n")}</pre>\n`;
+    },
+  );
+
   // Inline code: `...` → <code>...</code>
   text = text.replace(/`([^`]+)`/g, "<code>$1</code>");
 
@@ -207,7 +231,9 @@ export function createTelegramChannel(opts: {
           chunks: chunks.length,
           ms: Date.now() - messageStart,
         });
-        await sendFormatted((t, o) => ctx.reply(t, o as Parameters<typeof ctx.reply>[1]), response);
+        if (response) {
+          await sendFormatted((t, o) => ctx.reply(t, o as Parameters<typeof ctx.reply>[1]), response);
+        }
       } catch (err) {
         clearInterval(typingInterval);
         if (statusMessageId !== null) {
