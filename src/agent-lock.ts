@@ -1,11 +1,11 @@
 /**
  * Agent mutex — prevents overlapping agent runs.
- * Rejects with a timeout error if the lock can't be acquired within 3 minutes.
+ * Rejects with a timeout error if the lock can't be acquired within 5 minutes.
  */
 
 import { log } from "./logger";
 
-export const AGENT_LOCK_TIMEOUT_MS = 3 * 60 * 1000;
+export const AGENT_LOCK_TIMEOUT_MS = 5 * 60 * 1000;
 
 let agentLock = Promise.resolve();
 let timeoutMs = AGENT_LOCK_TIMEOUT_MS;

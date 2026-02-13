@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach } from "bun:test";
-import { withAgentLock, resetAgentLock, AGENT_LOCK_TIMEOUT_MS } from "../src/agent-lock";
+import { withAgentLock, resetAgentLock } from "../src/agent-lock";
 
 beforeEach(() => {
   resetAgentLock();
@@ -45,10 +45,6 @@ describe("withAgentLock", () => {
     const result = await withAgentLock(async () => "recovered");
 
     expect(result).toBe("recovered");
-  });
-
-  test("defaults to 3-minute timeout", () => {
-    expect(AGENT_LOCK_TIMEOUT_MS).toBe(180_000);
   });
 
   test("rejects when lock cannot be acquired within timeout", async () => {

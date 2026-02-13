@@ -112,13 +112,13 @@ export async function callLLM(opts: {
   }
 
   // Convert messages
-  const messages = opts.messages.map((m) => {
+  const messages: Anthropic.MessageParam[] = opts.messages.map((m) => {
     if (typeof m.content === "string") {
       return { role: m.role, content: m.content };
     }
     return {
       role: m.role,
-      content: m.content.map((block) => {
+      content: m.content.map((block): Anthropic.ContentBlockParam => {
         if (block.type === "tool_use" && isOAuth) {
           return { ...block, name: toClaudeCodeToolName(block.name) };
         }
@@ -126,6 +126,18 @@ export async function callLLM(opts: {
       }),
     };
   });
+
+  // Add cache_control on the last message's last content block.
+  // Without this, the 20-block lookback window can't reach the system/tools
+  // cache breakpoints when conversations grow beyond ~20 messages.
+  if (messages.length > 0) {
+    const last = messages[messages.length - 1];
+    if (typeof last.content === "string") {
+      last.content = [{ type: "text", text: last.content, cache_control: { type: "ephemeral" } }];
+    } else if (Array.isArray(last.content) && last.content.length > 0) {
+      last.content[last.content.length - 1].cache_control = { type: "ephemeral" };
+    }
+  }
 
   log.info("llm", "Request", {
     model,
@@ -142,7 +154,7 @@ export async function callLLM(opts: {
     model,
     max_tokens: 8192,
     system: systemBlocks,
-    messages: messages as Anthropic.MessageParam[],
+    messages,
     tools,
     stream: true,
   });
