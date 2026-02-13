@@ -47,4 +47,25 @@ describe("bash tool", () => {
     const result = await tool.execute({ command: "sleep 10", timeout: 1000 });
     expect(result).toContain("timed out");
   });
+
+  test("truncates output exceeding 100k characters", async () => {
+    const result = await tool.execute({
+      command: "head -c 120000 /dev/zero | tr '\\0' 'A'",
+    });
+
+    expect(result.length).toBeLessThan(120000);
+    expect(result).toContain("[... ");
+    expect(result).toContain(" characters omitted ...]");
+    expect(result.startsWith("A")).toBe(true);
+    expect(result.endsWith("A")).toBe(true);
+  });
+
+  test("does not truncate output under 100k characters", async () => {
+    const result = await tool.execute({
+      command: "head -c 1000 /dev/zero | tr '\\0' 'B'",
+    });
+
+    expect(result).toBe("B".repeat(1000));
+    expect(result).not.toContain("omitted");
+  });
 });

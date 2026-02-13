@@ -4,6 +4,8 @@
 
 import type { Tool } from "./index";
 
+const MAX_OUTPUT_CHARS = 100_000;
+
 export function createBashTool(workspaceDir: string): Tool {
   return {
     name: "bash",
@@ -53,7 +55,17 @@ export function createBashTool(workspaceDir: string): Tool {
           }, timeout);
         });
 
-        return await Promise.race([readOutput, timeoutPromise]);
+        const result = await Promise.race([readOutput, timeoutPromise]);
+        if (result.length > MAX_OUTPUT_CHARS) {
+          const half = Math.floor(MAX_OUTPUT_CHARS / 2);
+          const omitted = result.length - MAX_OUTPUT_CHARS;
+          return (
+            result.slice(0, half) +
+            `\n\n[... ${omitted} characters omitted ...]\n\n` +
+            result.slice(-half)
+          );
+        }
+        return result;
       } catch (err) {
         return `Error: ${err instanceof Error ? err.message : String(err)}`;
       }

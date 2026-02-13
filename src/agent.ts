@@ -101,8 +101,12 @@ export async function runAgent(
       authStorage: ctx.authStorage,
     });
 
-    // Update token count from API response
-    totalTokens = response.usage.inputTokens + response.usage.outputTokens;
+    // Update token count from API response (include cached tokens for accurate context size)
+    totalTokens =
+      response.usage.inputTokens +
+      response.usage.outputTokens +
+      response.usage.cacheCreationInputTokens +
+      response.usage.cacheReadInputTokens;
     log.info("agent", "Token usage", {
       iteration: i + 1,
       inputTokens: response.usage.inputTokens,

@@ -5,6 +5,7 @@ import { buildSystemPrompt } from "../src/workspace/prompt";
 import { formatSkillsForPrompt } from "../src/skills/prompt";
 import type { LLMResponse, LLMContentBlock, LLMMessage } from "../src/llm";
 import type { ProgressUpdate } from "../src/progress";
+import { CONTEXT_WINDOW, RESERVE_FLOOR } from "../src/memory/compaction";
 import { createTempDir, cleanupTempDir } from "./helpers/temp-dir";
 import {
   buildLLMResponse,
@@ -330,6 +331,85 @@ describe("agent loop", () => {
 
     expect(result).toBe("Here's what I found");
     expect(tool.calls.length).toBe(1);
+  });
+
+  test("includes cached tokens in compaction threshold check", async () => {
+    const overThreshold = CONTEXT_WINDOW - RESERVE_FLOOR + 1;
+    const tool = buildStubTool("bash", "ok");
+    const sessionStore = new SessionStore(tmpDir);
+    let callCount = 0;
+    const highCacheUsage = {
+      inputTokens: 10,
+      outputTokens: 50,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: overThreshold,
+    };
+
+    const ctx: AgentContext = {
+      authStorage: buildStubAuth(),
+      tools: [tool],
+      skills: [],
+      workspaceFiles: [],
+      sessionStore,
+      sessionKey: "compact-test",
+      memoryIndex,
+      callLLM: async () => {
+        callCount++;
+        if (callCount === 1) {
+          return buildLLMResponse({
+            text: "",
+            toolCalls: [{ id: "tc1", name: "bash", input: {} }],
+            stopReason: "tool_use",
+            usage: highCacheUsage,
+          });
+        }
+        if (callCount === 2) {
+          return buildLLMResponse({
+            text: "",
+            toolCalls: [{ id: "tc2", name: "bash", input: {} }],
+            stopReason: "tool_use",
+            usage: highCacheUsage,
+          });
+        }
+        return buildLLMResponse({ text: "done" });
+      },
+    };
+
+    await runAgent(ctx, "trigger compaction");
+
+    const saved = sessionStore.get("compact-test");
+    expect(saved[0].content).toContain("[Previous conversation summary]");
+  });
+
+  test("does not compact when only cached tokens are low", async () => {
+    const sessionStore = new SessionStore(tmpDir);
+
+    const ctx: AgentContext = {
+      authStorage: buildStubAuth(),
+      tools: [],
+      skills: [],
+      workspaceFiles: [],
+      sessionStore,
+      sessionKey: "no-compact-test",
+      memoryIndex,
+      callLLM: async () => {
+        return buildLLMResponse({
+          text: "no compaction needed",
+          usage: {
+            inputTokens: 100,
+            outputTokens: 50,
+            cacheCreationInputTokens: 0,
+            cacheReadInputTokens: 50_000,
+          },
+        });
+      },
+    };
+
+    await runAgent(ctx, "stay within budget");
+
+    const saved = sessionStore.get("no-compact-test");
+    expect(saved.length).toBe(2);
+    expect(saved[0].content).toBe("stay within budget");
   });
 
   test("accepts LLMContentBlock[] as userMessage with image blocks", async () => {
