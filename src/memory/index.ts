@@ -283,6 +283,7 @@ export class MemoryIndex {
       }
 
       if (lastMarkerIndex <= 0) {
+        this.removeFile(filePath);
         return;
       }
 
