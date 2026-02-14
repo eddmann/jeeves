@@ -30,6 +30,7 @@ function ensureCustomSqlite(): void {
 
 const CHUNK_SIZE_CHARS = 1600; // ~400 tokens
 const CHUNK_OVERLAP_CHARS = 320; // ~80 tokens
+const COMPACTION_MARKER = '{"@@compaction":true}';
 
 export interface MemorySearchResult {
   filePath: string;
@@ -51,7 +52,6 @@ export class MemoryIndex {
   ) {
     this.workspaceDir = workspaceDir;
 
-    // Ensure parent directory exists
     const dbDir = dbPath.substring(0, dbPath.lastIndexOf("/"));
     if (dbDir) mkdirSync(dbDir, { recursive: true });
 
@@ -59,7 +59,6 @@ export class MemoryIndex {
     this.db = new Database(dbPath, { create: true });
     this.db.exec("PRAGMA journal_mode = WAL");
 
-    // Try to load sqlite-vec extension
     this.hasVec = false;
     try {
       sqliteVec.load(this.db);
@@ -69,6 +68,41 @@ export class MemoryIndex {
     }
 
     this.initSchema();
+  }
+
+  /** Sync all indexable content: memory files + session files. */
+  async sync(): Promise<void> {
+    await this.syncMemories();
+    await this.syncSessions();
+  }
+
+  /** Search memory using hybrid vector + keyword search. */
+  async search(query: string, maxResults = 6): Promise<MemorySearchResult[]> {
+    let vectorHits: SearchHit[] = [];
+    try {
+      const queryEmbedding = (await this.embedFn([query]))[0];
+      if (queryEmbedding) {
+        vectorHits = this.vectorSearch(queryEmbedding, maxResults * 4);
+      }
+    } catch (err) {
+      log.warn("memory-index", "Vector search failed", formatError(err));
+    }
+
+    const keywordHits = this.keywordSearch(query, maxResults * 4);
+    const merged = mergeHybridResults(vectorHits, keywordHits, { maxResults });
+
+    return merged.map((h) => ({
+      filePath: h.filePath,
+      startLine: h.startLine,
+      endLine: h.endLine,
+      text: h.text,
+      score: h.score,
+    }));
+  }
+
+  /** Close the database connection. */
+  close(): void {
+    this.db.close();
   }
 
   private initSchema(): void {
@@ -95,7 +129,6 @@ export class MemoryIndex {
       CREATE INDEX IF NOT EXISTS idx_chunks_file ON chunks(file_path);
     `);
 
-    // Create FTS5 virtual table if it doesn't exist
     try {
       this.db.exec(`
         CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
@@ -108,7 +141,6 @@ export class MemoryIndex {
       // FTS table may already exist
     }
 
-    // Triggers to keep FTS in sync
     this.db.exec(`
       CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
         INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
@@ -123,12 +155,17 @@ export class MemoryIndex {
     `);
   }
 
-  /** Sync memory files from workspace. Re-index changed files, remove stale entries. */
-  async sync(): Promise<void> {
+  private hasIncompleteEmbeddings(filePath: string): boolean {
+    const row = this.db
+      .prepare("SELECT COUNT(*) as c FROM chunks WHERE file_path = ? AND embedding IS NULL")
+      .get(filePath) as { c: number };
+    return row.c > 0;
+  }
+
+  private async syncMemories(): Promise<void> {
     const memoryDir = join(this.workspaceDir, "memory");
     const filesToIndex: Array<{ relativePath: string; absolutePath: string }> = [];
 
-    // Collect MEMORY.md + memory/*.md
     const memoryMdPath = join(this.workspaceDir, "MEMORY.md");
     if (existsSync(memoryMdPath)) {
       filesToIndex.push({ relativePath: "MEMORY.md", absolutePath: memoryMdPath });
@@ -145,7 +182,6 @@ export class MemoryIndex {
       }
     }
 
-    // Check which files have changed
     const getFile = this.db.prepare("SELECT hash, mtime_ms FROM files WHERE path = ?");
     const allPaths = new Set<string>();
 
@@ -157,13 +193,13 @@ export class MemoryIndex {
       const existing = getFile.get(file.relativePath) as
         | { hash: string; mtime_ms: number }
         | undefined;
-      if (existing && existing.hash === hash) continue;
+      if (existing && existing.hash === hash && !this.hasIncompleteEmbeddings(file.relativePath)) {
+        continue;
+      }
 
-      // Re-index this file
       await this.indexFile(file.relativePath, content, hash);
     }
 
-    // Remove stale entries
     const allDbPaths = this.db
       .prepare("SELECT path FROM files")
       .all()
@@ -176,16 +212,129 @@ export class MemoryIndex {
     }
   }
 
-  private async indexFile(filePath: string, content: string, hash: string): Promise<void> {
-    // Remove old chunks
-    this.removeFile(filePath);
+  private async syncSessions(): Promise<void> {
+    const sessionsDir = join(this.workspaceDir, "sessions");
+    if (!existsSync(sessionsDir)) return;
 
-    // Chunk the content
+    const entries = readdirSync(sessionsDir).filter((e) => e.endsWith(".jsonl"));
+    if (entries.length === 0) return;
+
+    const groups = new Map<string, Array<{ entry: string; seq: number }>>();
+
+    for (const entry of entries) {
+      const match = entry.match(/^(.+?)(?:\.(\d+))?\.jsonl$/);
+      if (!match) continue;
+
+      const key = match[1];
+      const seq = match[2] ? Number(match[2]) : 0;
+
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push({ entry, seq });
+    }
+
+    const activeSessionPaths = new Set<string>();
+
+    for (const [, files] of groups) {
+      const maxSeq = Math.max(...files.map((f) => f.seq));
+      for (const file of files) {
+        const isActive = file.seq === maxSeq;
+        activeSessionPaths.add(`session:${file.entry}`);
+        await this.indexSessionFile(join(sessionsDir, file.entry), isActive);
+      }
+    }
+
+    const dbSessionPaths = this.db
+      .prepare("SELECT path FROM files WHERE path LIKE 'session:%'")
+      .all()
+      .map((r) => (r as { path: string }).path);
+
+    for (const dbPath of dbSessionPaths) {
+      if (!activeSessionPaths.has(dbPath)) {
+        this.removeFile(dbPath);
+      }
+    }
+  }
+
+  /**
+   * Index a JSONL session file for searchability.
+   * For the active session file, only indexes content before the last compaction
+   * marker — everything after the marker is already in the LLM's context window.
+   * For archived files, indexes the entire file.
+   */
+  private async indexSessionFile(sessionPath: string, isActive: boolean): Promise<void> {
+    if (!existsSync(sessionPath)) return;
+
+    const filename = sessionPath.split("/").pop() ?? sessionPath;
+    const filePath = `session:${filename}`;
+
+    const rawContent = readFileSync(sessionPath, "utf-8").trim();
+    if (!rawContent) return;
+
+    const allLines = rawContent.split("\n").filter((l) => l.trim());
+
+    let linesToIndex: string[];
+    if (isActive) {
+      let lastMarkerIndex = -1;
+      for (let i = allLines.length - 1; i >= 0; i--) {
+        if (allLines[i] === COMPACTION_MARKER) {
+          lastMarkerIndex = i;
+          break;
+        }
+      }
+
+      if (lastMarkerIndex <= 0) {
+        return;
+      }
+
+      linesToIndex = allLines.slice(0, lastMarkerIndex);
+    } else {
+      linesToIndex = allLines;
+    }
+
+    const indexableContent = linesToIndex.join("\n");
+    const hash = createHash("sha256").update(indexableContent).digest("hex");
+
+    const existing = this.db.prepare("SELECT hash FROM files WHERE path = ?").get(filePath) as
+      | { hash: string }
+      | undefined;
+    if (existing && existing.hash === hash && !this.hasIncompleteEmbeddings(filePath)) return;
+
+    const textParts: string[] = [];
+
+    for (const line of linesToIndex) {
+      if (line === COMPACTION_MARKER) continue;
+      try {
+        const msg = JSON.parse(line) as LLMMessage;
+        if (typeof msg.content === "string") {
+          textParts.push(`${msg.role}: ${msg.content}`);
+        } else {
+          const texts = msg.content
+            .filter((b) => b.type === "text")
+            .map((b) => (b as { text: string }).text);
+          if (texts.length > 0) {
+            textParts.push(`${msg.role}: ${texts.join("\n")}`);
+          }
+        }
+      } catch {
+        // Skip malformed lines
+      }
+    }
+
+    const sessionText = textParts.join("\n\n");
+    if (!sessionText) {
+      this.removeFile(filePath);
+      return;
+    }
+
+    await this.indexFile(filePath, sessionText, hash);
+  }
+
+  private async indexFile(filePath: string, content: string, hash: string): Promise<void> {
+    this.removeFile(filePath);
     const chunks = chunkText(content);
 
     if (chunks.length === 0) return;
 
-    // Generate embeddings
     let embeddings: number[][] = [];
     try {
       embeddings = await this.embedFn(chunks.map((c) => c.text));
@@ -196,12 +345,10 @@ export class MemoryIndex {
       });
     }
 
-    // Insert file record
     this.db
       .prepare("INSERT OR REPLACE INTO files (path, hash, mtime_ms) VALUES (?, ?, ?)")
       .run(filePath, hash, Date.now());
 
-    // Insert chunks
     const insertChunk = this.db.prepare(
       "INSERT INTO chunks (file_path, start_line, end_line, text, hash, embedding) VALUES (?, ?, ?, ?, ?, ?)",
     );
@@ -223,34 +370,6 @@ export class MemoryIndex {
   private removeFile(filePath: string): void {
     this.db.prepare("DELETE FROM chunks WHERE file_path = ?").run(filePath);
     this.db.prepare("DELETE FROM files WHERE path = ?").run(filePath);
-  }
-
-  /** Search memory using hybrid vector + keyword search. */
-  async search(query: string, maxResults = 6): Promise<MemorySearchResult[]> {
-    // Vector search
-    let vectorHits: SearchHit[] = [];
-    try {
-      const queryEmbedding = (await this.embedFn([query]))[0];
-      if (queryEmbedding) {
-        vectorHits = this.vectorSearch(queryEmbedding, maxResults * 4);
-      }
-    } catch (err) {
-      log.warn("memory-index", "Vector search failed", formatError(err));
-    }
-
-    // FTS5 keyword search
-    const keywordHits = this.keywordSearch(query, maxResults * 4);
-
-    // Merge results
-    const merged = mergeHybridResults(vectorHits, keywordHits, { maxResults });
-
-    return merged.map((h) => ({
-      filePath: h.filePath,
-      startLine: h.startLine,
-      endLine: h.endLine,
-      text: h.text,
-      score: h.score,
-    }));
   }
 
   private vectorSearch(queryEmbedding: number[], limit: number): SearchHit[] {
@@ -358,68 +477,6 @@ export class MemoryIndex {
       return [];
     }
   }
-
-  /** Index a JSONL session file for searchability. */
-  async indexSessionFile(sessionPath: string): Promise<void> {
-    if (!existsSync(sessionPath)) return;
-
-    const filename = sessionPath.split("/").pop() ?? sessionPath;
-    const filePath = `session:${filename}`;
-
-    const content = readFileSync(sessionPath, "utf-8").trim();
-    if (!content) return;
-
-    const hash = createHash("sha256").update(content).digest("hex");
-
-    // Check if already indexed with same hash
-    const existing = this.db.prepare("SELECT hash FROM files WHERE path = ?").get(filePath) as
-      | { hash: string }
-      | undefined;
-    if (existing && existing.hash === hash) return;
-
-    // Parse JSONL and extract text content
-    const lines = content.split("\n").filter((l) => l.trim());
-    const textParts: string[] = [];
-
-    for (const line of lines) {
-      try {
-        const msg = JSON.parse(line) as LLMMessage;
-        if (typeof msg.content === "string") {
-          textParts.push(`${msg.role}: ${msg.content}`);
-        } else {
-          const texts = msg.content
-            .filter((b) => b.type === "text")
-            .map((b) => (b as { text: string }).text);
-          if (texts.length > 0) {
-            textParts.push(`${msg.role}: ${texts.join("\n")}`);
-          }
-        }
-      } catch {
-        // Skip malformed lines
-      }
-    }
-
-    const sessionText = textParts.join("\n\n");
-    if (!sessionText) return;
-
-    await this.indexFile(filePath, sessionText, hash);
-  }
-
-  /** Index all session files in a directory. */
-  async indexSessionFiles(sessionsDir: string): Promise<void> {
-    if (!existsSync(sessionsDir)) return;
-
-    for (const entry of readdirSync(sessionsDir)) {
-      if (entry.endsWith(".jsonl")) {
-        await this.indexSessionFile(join(sessionsDir, entry));
-      }
-    }
-  }
-
-  /** Close the database connection. */
-  close(): void {
-    this.db.close();
-  }
 }
 
 /** Chunk text into overlapping segments by line. */
@@ -447,7 +504,6 @@ export function chunkText(
         });
       }
 
-      // Move start back by overlap
       if (i < lines.length - 1) {
         let overlapChars = 0;
         let overlapStart = i;

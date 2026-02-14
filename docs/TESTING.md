@@ -48,30 +48,30 @@ Multiple assertions in a single test are fine when they verify different facets 
 
 Tests are organized by **feature/behavior**, not by file structure:
 
-| Test file                    | What it covers                                                                                                           |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `agent.test.ts`              | Agent loop: LLM calls, tool execution, iteration limits, session persistence, progress reporting, system prompt building |
-| `session.test.ts`            | Conversation persistence: save/load, truncation, orphaned tool_result cleanup, filesystem safety                         |
-| `heartbeat.test.ts`          | Periodic check-ins: active hours, content detection, HEARTBEAT_OK suppression, deduplication                             |
-| `scheduling.test.ts`         | Cron scheduler + cron tool: job CRUD, schedule types (at/every/cron), execution, persistence, tool interface             |
-| `workspace.test.ts`          | Workspace files: loading, truncation, initialization, template seeding, .env loading                                     |
-| `skills.test.ts`             | Skill discovery: loading, validation (name, description, directory match, format), overrides                             |
-| `telegram.test.ts`           | Pure functions: markdown-to-HTML conversion, message splitting, progress formatting, reply context                       |
-| `stealth.test.ts`            | OAuth stealth: tool name remapping (both directions), headers, system prompt prefix                                      |
-| `bash-tool.test.ts`          | Bash tool: command execution, exit codes, stderr, working directory, timeout                                             |
-| `read-file-tool.test.ts`     | Read tool: line numbering, path resolution, error handling                                                               |
-| `write-file-tool.test.ts`    | Write tool: content writing, directory creation, overwrite, error handling                                               |
-| `web-fetch-tool.test.ts`     | Web fetch: HTTP errors, HTML extraction, non-HTML passthrough, truncation, Readability fallback                          |
-| `auth-storage.test.ts`       | Auth storage: credential CRUD, OAuth refresh (with DI), env var fallback, file permissions, logout                       |
-| `edit-file-tool.test.ts`     | Edit tool: find-and-replace, no-match handling, multi-occurrence                                                         |
-| `web-search-tool.test.ts`    | Web search: query execution, result parsing, count limits, error handling                                                |
-| `memory-index.test.ts`       | MemoryIndex: file indexing, sync, chunk storage, stale cleanup                                                           |
-| `memory-hybrid.test.ts`      | Hybrid search: vector + keyword merge, weighting, score normalization                                                    |
-| `memory-search-tool.test.ts` | Memory search tool: query interface, result formatting                                                                   |
-| `embeddings.test.ts`         | Embeddings: OpenAI API calls, batching, no-op embedder                                                                   |
-| `compaction.test.ts`         | Compaction: token estimation, summarization, orphan repair, flush/compact thresholds                                     |
-| `agent-lock.test.ts`         | Agent mutex: serialization, timeout, lock release                                                                        |
-| `transcribe.test.ts`         | Transcription: Whisper API wrapper, file format handling                                                                 |
+| Test file                    | What it covers                                                                                                                               |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent.test.ts`              | Agent loop: LLM calls, tool execution, iteration limits, session persistence, progress reporting, system prompt building                     |
+| `session.test.ts`            | Conversation persistence: save/load, truncation, orphaned tool_result cleanup, filesystem safety                                             |
+| `heartbeat.test.ts`          | Periodic check-ins: active hours, content detection, HEARTBEAT_OK suppression, deduplication                                                 |
+| `scheduling.test.ts`         | Cron scheduler + cron tool: job CRUD, schedule types (at/every/cron), execution, persistence, tool interface                                 |
+| `workspace.test.ts`          | Workspace files: loading, truncation, initialization, template seeding, .env loading                                                         |
+| `skills.test.ts`             | Skill discovery: loading, validation (name, description, directory match, format), overrides                                                 |
+| `telegram.test.ts`           | Pure functions: markdown-to-HTML conversion, message splitting, progress formatting, reply context                                           |
+| `stealth.test.ts`            | OAuth stealth: tool name remapping (both directions), headers, system prompt prefix                                                          |
+| `bash-tool.test.ts`          | Bash tool: command execution, exit codes, stderr, working directory, timeout                                                                 |
+| `read-file-tool.test.ts`     | Read tool: line numbering, path resolution, error handling                                                                                   |
+| `write-file-tool.test.ts`    | Write tool: content writing, directory creation, overwrite, error handling                                                                   |
+| `web-fetch-tool.test.ts`     | Web fetch: HTTP errors, HTML extraction, non-HTML passthrough, truncation, Readability fallback                                              |
+| `auth-storage.test.ts`       | Auth storage: credential CRUD, OAuth refresh (with DI), env var fallback, file permissions, logout                                           |
+| `edit-file-tool.test.ts`     | Edit tool: find-and-replace, no-match handling, multi-occurrence                                                                             |
+| `web-search-tool.test.ts`    | Web search: query execution, result parsing, count limits, error handling                                                                    |
+| `memory-index.test.ts`       | MemoryIndex: memory file sync, session indexing (active/archived, compaction-marker-aware), chunking, stale cleanup, self-healing embeddings |
+| `memory-hybrid.test.ts`      | Hybrid search: vector + keyword merge, weighting, score normalization                                                                        |
+| `memory-search-tool.test.ts` | Memory search tool: query interface, result formatting                                                                                       |
+| `embeddings.test.ts`         | Embeddings: OpenAI API calls, batching, no-op embedder                                                                                       |
+| `compaction.test.ts`         | Compaction: token estimation, summarization, orphan repair, flush/compact thresholds                                                         |
+| `agent-lock.test.ts`         | Agent mutex: serialization, timeout, lock release                                                                                            |
+| `transcribe.test.ts`         | Transcription: Whisper API wrapper, file format handling                                                                                     |
 
 ## Test Doubles Used
 

@@ -50,6 +50,7 @@ describe("memory_search tool", () => {
     );
 
     const index = new MemoryIndex(join(memoryDir, "index.sqlite"), stubEmbedder, tmpDir);
+    await index.sync();
     const tool = createMemorySearchTool(index);
 
     const result = await tool.execute({ query: "sky color blue" });

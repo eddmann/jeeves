@@ -129,7 +129,6 @@ async function main() {
     workspaceDir,
   );
   await memoryIndex.sync();
-  await memoryIndex.indexSessionFiles(join(workspaceDir, "sessions"));
   const transcribe = openaiKey ? createTranscriber(openaiKey) : undefined;
   log.info("startup", "Memory index initialized", {
     mode: openaiKey ? "semantic + keyword" : "keyword-only",

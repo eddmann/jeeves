@@ -35,7 +35,6 @@ export function createMemorySearchTool(memoryIndex: MemoryIndex): Tool {
       }
 
       try {
-        await memoryIndex.sync();
         const results = await memoryIndex.search(query, maxResults);
 
         if (results.length === 0) {

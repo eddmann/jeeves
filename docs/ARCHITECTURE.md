@@ -225,13 +225,20 @@ SQLite-backed semantic search engine using `bun:sqlite` with hybrid vector + key
 
 **What gets indexed**:
 
-1. **Memory files**: `MEMORY.md` + all `.md` files in `workspace/memory/` — synced via `sync()`, which detects changes by hash comparison
-2. **Session files**: All `.jsonl` files in `workspace/sessions/` — messages parsed and formatted as `"role: content"` blocks before chunking
-3. **Stale cleanup**: On sync, files no longer on disk are removed (except `session:*` entries)
+1. **Memory files**: `MEMORY.md` + all `.md` files in `workspace/memory/` — change detection via SHA-256 hash comparison
+2. **Session files**: JSONL files in `workspace/sessions/`, grouped by session key. Files are numbered sequentially (`chat.jsonl` = seq 0, `chat.1.jsonl` = seq 1, etc.); the highest sequence number is the **active** session, all others are **archived**:
+   - **Archived files**: indexed entirely (all content is historical)
+   - **Active file with compaction marker**: only content **before** the last `@@compaction` marker is indexed — everything after is already in the LLM's context window
+   - **Active file without compaction marker**: not indexed at all (entire file is in context)
+3. **Stale cleanup**: both memory and session entries are removed from the index when their source files no longer exist on disk
+
+**Sync timing**: `sync()` runs at startup and after compaction.
+
+**Self-healing**: if embeddings fail (network timeout, API error), chunks are stored without vectors and keyword search still works. On the next sync, files with missing embeddings are re-indexed even if the content hash hasn't changed.
 
 **Chunking**: 1,600 chars (~400 tokens) with 320-char overlap (~80 tokens), breaking on line boundaries.
 
-**Embeddings** (`src/memory/embeddings.ts`): OpenAI `text-embedding-3-small` model, batched up to 100 texts per API call. When `OPENAI_API_KEY` is not set, a no-op embedder is used — chunks are stored without vectors and keyword search still works.
+**Embeddings** (`src/memory/embeddings.ts`): OpenAI `text-embedding-3-small` model, batched up to 100 texts per API call, 30s timeout with 1 retry. When `OPENAI_API_KEY` is not set, a no-op embedder is used — keyword search only.
 
 ### Hybrid Search (`src/memory/hybrid.ts`)
 
@@ -244,7 +251,7 @@ Two search signals merged with weighted combination:
 
 ### Memory Search Tool (`src/tools/memory-search.ts`)
 
-Exposed to the LLM as the `memory_search` tool. Calls `memoryIndex.sync()` first (picks up freshly written memory files), then searches. Returns formatted results: `[N] filePath:startLine-endLine (score% match)` with the matching text.
+Exposed to the LLM as the `memory_search` tool. Searches the index and returns formatted results: `[N] filePath:startLine-endLine (score% match)` with the matching text.
 
 ### Circular Data Flow
 
@@ -261,7 +268,7 @@ Agent loop runs (up to 25 iterations)
     ├─ shouldFlush → inject "save to memory files" prompt → LLM writes files
     └─ shouldCompact → summarize old messages, write compaction marker
             ↓
-        MemoryIndex.sync() → re-index freshly written memory files
+        MemoryIndex.sync() → re-index memory files + session transcripts
     ↓
 SessionStore.append() → persist new messages
     ↓
