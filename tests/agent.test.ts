@@ -1,5 +1,13 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { runAgent, MAX_ITERATIONS, sanitizeForPersist, type AgentContext } from "../src/agent";
+import { describe, test, expect, beforeEach, afterEach, setSystemTime } from "bun:test";
+import {
+  runAgent,
+  MAX_ITERATIONS,
+  ITERATION_WARNING_THRESHOLD,
+  sanitizeForPersist,
+  formatTimestamp,
+  formatIterationWarning,
+  type AgentContext,
+} from "../src/agent";
 import { SessionStore } from "../src/session";
 import { buildSystemPrompt } from "../src/workspace/prompt";
 import { formatSkillsForPrompt } from "../src/skills/prompt";
@@ -26,6 +34,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  setSystemTime();
   cleanupTempDir(tmpDir);
 });
 
@@ -409,7 +418,7 @@ describe("agent loop", () => {
 
     const saved = sessionStore.get("no-compact-test");
     expect(saved.length).toBe(2);
-    expect(saved[0].content).toBe("stay within budget");
+    expect(saved[0].content).toContain("stay within budget");
   });
 
   test("accepts LLMContentBlock[] as userMessage with image blocks", async () => {
@@ -578,5 +587,192 @@ describe("system prompt building", () => {
     const result = formatSkillsForPrompt(skills);
 
     expect(result).toContain("<location>/workspace/skills/my-skill/SKILL.md</location>");
+  });
+});
+
+describe("formatTimestamp", () => {
+  afterEach(() => setSystemTime());
+
+  test("formats a date as UTC ISO-like string", () => {
+    const result = formatTimestamp(new Date("2025-06-15T14:30:00Z"));
+
+    expect(result).toBe("[Current time: 2025-06-15 14:30:00 UTC]");
+  });
+
+  test("uses current time when no argument is provided", () => {
+    setSystemTime(new Date("2025-01-01T09:00:00Z"));
+
+    const result = formatTimestamp();
+
+    expect(result).toBe("[Current time: 2025-01-01 09:00:00 UTC]");
+  });
+});
+
+describe("formatIterationWarning", () => {
+  test("pluralizes iterations correctly", () => {
+    const result = formatIterationWarning(22, 25);
+
+    expect(result).toBe("[System: 3 iterations remaining, begin wrapping up.]");
+  });
+
+  test("uses singular when one iteration remains", () => {
+    const result = formatIterationWarning(24, 25);
+
+    expect(result).toBe("[System: 1 iteration remaining, begin wrapping up.]");
+  });
+});
+
+describe("agent information sharing", () => {
+  test("prepends timestamp to string user messages", async () => {
+    setSystemTime(new Date("2025-03-15T10:30:00Z"));
+    let receivedMessages: LLMMessage[] = [];
+    const ctx: AgentContext = {
+      authStorage: buildStubAuth(),
+      tools: [],
+      skills: [],
+      workspaceFiles: [],
+      sessionStore: new SessionStore(tmpDir),
+      sessionKey: "test-session",
+      memoryIndex,
+      callLLM: async (opts) => {
+        receivedMessages = opts.messages;
+        return buildLLMResponse({ text: "ok" });
+      },
+    };
+
+    await runAgent(ctx, "Hello");
+
+    const userMsg = receivedMessages[0];
+    expect(userMsg.content).toBe("[Current time: 2025-03-15 10:30:00 UTC]\n\nHello");
+  });
+
+  test("prepends timestamp as text block for content block messages", async () => {
+    setSystemTime(new Date("2025-03-15T10:30:00Z"));
+    let receivedMessages: LLMMessage[] = [];
+    const ctx: AgentContext = {
+      authStorage: buildStubAuth(),
+      tools: [],
+      skills: [],
+      workspaceFiles: [],
+      sessionStore: new SessionStore(tmpDir),
+      sessionKey: "test-session",
+      memoryIndex,
+      callLLM: async (opts) => {
+        receivedMessages = opts.messages;
+        return buildLLMResponse({ text: "ok" });
+      },
+    };
+
+    const content: LLMContentBlock[] = [
+      { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "abc" } },
+      { type: "text", text: "What is this?" },
+    ];
+
+    await runAgent(ctx, content);
+
+    const blocks = receivedMessages[0].content as LLMContentBlock[];
+    expect(blocks[0]).toEqual({ type: "text", text: "[Current time: 2025-03-15 10:30:00 UTC]" });
+    expect(blocks[1].type).toBe("image");
+    expect(blocks[2]).toEqual({ type: "text", text: "What is this?" });
+  });
+
+  test("injects iteration warning when nearing the loop limit", async () => {
+    const iterationsBeforeWarning = MAX_ITERATIONS - ITERATION_WARNING_THRESHOLD;
+    const tool = buildStubTool("bash", "ok");
+    const allMessages: LLMMessage[][] = [];
+    let callCount = 0;
+
+    const ctx: AgentContext = {
+      authStorage: buildStubAuth(),
+      tools: [tool],
+      skills: [],
+      workspaceFiles: [],
+      sessionStore: new SessionStore(tmpDir),
+      sessionKey: "test-session",
+      memoryIndex,
+      callLLM: async (opts) => {
+        callCount++;
+        allMessages.push([...opts.messages]);
+        if (callCount <= iterationsBeforeWarning + 1) {
+          return buildLLMResponse({
+            text: "",
+            toolCalls: [{ id: `tc${callCount}`, name: "bash", input: {} }],
+            stopReason: "tool_use",
+          });
+        }
+        return buildLLMResponse({ text: "done" });
+      },
+    };
+
+    await runAgent(ctx, "go");
+
+    // The call *after* the first warning iteration sees the warning in its messages.
+    // Iteration index iterationsBeforeWarning (0-based) = iteration iterationsBeforeWarning+1 (1-based)
+    // triggers the first warning. The messages for the *next* call should contain the warning text.
+    const msgsAtWarningCall = allMessages[iterationsBeforeWarning + 1];
+    const hasWarning = msgsAtWarningCall.some((m) => {
+      if (typeof m.content === "string") return m.content.includes("[System:");
+      return m.content.some((b) => b.type === "text" && b.text.includes("[System:"));
+    });
+
+    expect(hasWarning).toBe(true);
+  });
+
+  test("does not inject iteration warning during early iterations", async () => {
+    const tool = buildStubTool("bash", "ok");
+    let messagesAtCall2: LLMMessage[] = [];
+    let callCount = 0;
+
+    const ctx: AgentContext = {
+      authStorage: buildStubAuth(),
+      tools: [tool],
+      skills: [],
+      workspaceFiles: [],
+      sessionStore: new SessionStore(tmpDir),
+      sessionKey: "test-session",
+      memoryIndex,
+      callLLM: async (opts) => {
+        callCount++;
+        if (callCount === 2) messagesAtCall2 = [...opts.messages];
+        if (callCount <= 2) {
+          return buildLLMResponse({
+            text: "",
+            toolCalls: [{ id: `tc${callCount}`, name: "bash", input: {} }],
+            stopReason: "tool_use",
+          });
+        }
+        return buildLLMResponse({ text: "done" });
+      },
+    };
+
+    await runAgent(ctx, "go");
+
+    const hasWarning = messagesAtCall2.some((m) => {
+      if (typeof m.content === "string") return m.content.includes("[System:");
+      return m.content.some((b) => b.type === "text" && b.text.includes("[System:"));
+    });
+
+    expect(hasWarning).toBe(false);
+  });
+
+  test("persists timestamp in session history", async () => {
+    setSystemTime(new Date("2025-03-15T10:30:00Z"));
+    const sessionStore = new SessionStore(tmpDir);
+    const ctx: AgentContext = {
+      authStorage: buildStubAuth(),
+      tools: [],
+      skills: [],
+      workspaceFiles: [],
+      sessionStore,
+      sessionKey: "persist-ts",
+      memoryIndex,
+      callLLM: async () => buildLLMResponse({ text: "ok" }),
+    };
+
+    await runAgent(ctx, "Hello");
+
+    const saved = sessionStore.get("persist-ts");
+    const userMsg = saved.find((m) => m.role === "user");
+    expect(userMsg!.content).toContain("[Current time: 2025-03-15 10:30:00 UTC]");
   });
 });

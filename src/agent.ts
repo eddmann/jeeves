@@ -16,6 +16,22 @@ import type { MemoryIndex } from "./memory/index";
 import { shouldFlush, shouldCompact, buildFlushPrompt, compactSession } from "./memory/compaction";
 
 export const MAX_ITERATIONS = 25;
+export const ITERATION_WARNING_THRESHOLD = 3;
+
+/** Format current time as a short prefix for the user message. */
+export function formatTimestamp(now: Date = new Date()): string {
+  const iso = now
+    .toISOString()
+    .replace("T", " ")
+    .replace(/\.\d+Z$/, " UTC");
+  return `[Current time: ${iso}]`;
+}
+
+/** Build an iteration warning string when nearing the loop limit. */
+export function formatIterationWarning(iteration: number, max: number): string {
+  const remaining = max - iteration;
+  return `[System: ${remaining} iteration${remaining === 1 ? "" : "s"} remaining, begin wrapping up.]`;
+}
 
 export interface AgentContext {
   authStorage: AuthStorage;
@@ -68,8 +84,13 @@ export async function runAgent(
     skillsPrompt,
   });
 
-  // Append user message
-  const userMsg: LLMMessage = { role: "user", content: userMessage };
+  // Prepend current time to user message (avoids busting system prompt cache)
+  const timestamp = formatTimestamp();
+  const taggedContent: string | LLMContentBlock[] =
+    typeof userMessage === "string"
+      ? `${timestamp}\n\n${userMessage}`
+      : [{ type: "text", text: timestamp }, ...userMessage];
+  const userMsg: LLMMessage = { role: "user", content: taggedContent };
   history.push(userMsg);
 
   // Track new messages for append
@@ -191,6 +212,12 @@ export async function runAgent(
         tool_use_id: tc.id,
         content: result,
       });
+    }
+
+    // Warn when nearing the iteration limit (text block alongside tool results)
+    const remaining = MAX_ITERATIONS - (i + 1);
+    if (remaining > 0 && remaining <= ITERATION_WARNING_THRESHOLD) {
+      toolResults.push({ type: "text", text: formatIterationWarning(i + 1, MAX_ITERATIONS) });
     }
 
     const toolResultMsg: LLMMessage = { role: "user", content: toolResults };
