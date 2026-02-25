@@ -153,6 +153,32 @@ export async function runAgent(
         continue;
       }
 
+      // After flush, compact immediately to avoid re-triggering flush on next run
+      if (hasFlushed) {
+        log.info("agent", "Compacting session after memory flush", { totalTokens });
+        ctx.sessionStore.append(ctx.sessionKey, sanitizeForPersist(newMessages));
+        newMessages.length = 0;
+
+        const result = await compactSession({
+          messages: history,
+          totalTokens,
+          callLLM: ctx.callLLM ?? callLLM,
+          authStorage: ctx.authStorage,
+        });
+
+        history.length = 0;
+        history.push(...result.messages);
+        ctx.sessionStore.compact(ctx.sessionKey, result.messages);
+
+        try {
+          await ctx.memoryIndex.sync();
+        } catch (err) {
+          log.warn("agent", "Memory index sync failed after compaction", formatError(err));
+        }
+
+        return response.text;
+      }
+
       ctx.sessionStore.append(ctx.sessionKey, sanitizeForPersist(newMessages));
       return response.text;
     }
