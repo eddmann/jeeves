@@ -412,6 +412,45 @@ describe("agent loop", () => {
     expect(saved[0].content).toBe("stay within budget");
   });
 
+  test("preemptively compacts when loaded history already exceeds context window", async () => {
+    const sessionStore = new SessionStore(tmpDir);
+
+    // Seed session with a message large enough to exceed CONTEXT_WINDOW estimate
+    // estimateHistoryTokens: ceil((chars / 4) * 1.2), so we need chars ≈ CONTEXT_WINDOW * 4
+    const hugeText = "x".repeat(CONTEXT_WINDOW * 4);
+    sessionStore.append("preemptive-test", [
+      { role: "user", content: "old question" },
+      { role: "assistant", content: hugeText },
+    ]);
+
+    let callCount = 0;
+    const ctx: AgentContext = {
+      authStorage: buildStubAuth(),
+      tools: [],
+      skills: [],
+      workspaceFiles: [],
+      sessionStore,
+      sessionKey: "preemptive-test",
+      memoryIndex,
+      callLLM: async () => {
+        callCount++;
+        if (callCount === 1) {
+          // Summarization call from preemptive compaction
+          return buildLLMResponse({ text: "Summary of old conversation" });
+        }
+        // Normal agent response after compaction
+        return buildLLMResponse({ text: "Hello after compaction" });
+      },
+    };
+
+    const result = await runAgent(ctx, "new message");
+
+    expect(result).toBe("Hello after compaction");
+    // Session should have been compacted (summary prepended)
+    const saved = sessionStore.get("preemptive-test");
+    expect(saved[0].content).toContain("[Previous conversation summary]");
+  });
+
   test("compacts session after memory flush to prevent repeated flush on next run", async () => {
     // Token count in the flush zone (above soft threshold, below hard threshold)
     const flushZoneTokens = CONTEXT_WINDOW - RESERVE_FLOOR - SOFT_THRESHOLD + 100;
