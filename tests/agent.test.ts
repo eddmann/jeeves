@@ -5,7 +5,7 @@ import { buildSystemPrompt } from "../src/workspace/prompt";
 import { formatSkillsForPrompt } from "../src/skills/prompt";
 import type { LLMResponse, LLMContentBlock, LLMMessage } from "../src/llm";
 import type { ProgressUpdate } from "../src/progress";
-import { CONTEXT_WINDOW, RESERVE_FLOOR } from "../src/memory/compaction";
+import { CONTEXT_WINDOW, RESERVE_FLOOR, SOFT_THRESHOLD } from "../src/memory/compaction";
 import { createTempDir, cleanupTempDir } from "./helpers/temp-dir";
 import {
   buildLLMResponse,
@@ -410,6 +410,105 @@ describe("agent loop", () => {
     const saved = sessionStore.get("no-compact-test");
     expect(saved.length).toBe(2);
     expect(saved[0].content).toBe("stay within budget");
+  });
+
+  test("preemptively compacts when loaded history already exceeds context window", async () => {
+    const sessionStore = new SessionStore(tmpDir);
+
+    // Seed session with a message large enough to exceed CONTEXT_WINDOW estimate
+    // estimateHistoryTokens: ceil((chars / 4) * 1.2), so we need chars ≈ CONTEXT_WINDOW * 4
+    const hugeText = "x".repeat(CONTEXT_WINDOW * 4);
+    sessionStore.append("preemptive-test", [
+      { role: "user", content: "old question" },
+      { role: "assistant", content: hugeText },
+    ]);
+
+    let callCount = 0;
+    const ctx: AgentContext = {
+      authStorage: buildStubAuth(),
+      tools: [],
+      skills: [],
+      workspaceFiles: [],
+      sessionStore,
+      sessionKey: "preemptive-test",
+      memoryIndex,
+      callLLM: async () => {
+        callCount++;
+        if (callCount === 1) {
+          // Summarization call from preemptive compaction
+          return buildLLMResponse({ text: "Summary of old conversation" });
+        }
+        // Normal agent response after compaction
+        return buildLLMResponse({ text: "Hello after compaction" });
+      },
+    };
+
+    const result = await runAgent(ctx, "new message");
+
+    expect(result).toBe("Hello after compaction");
+    // Session should have been compacted (summary prepended)
+    const saved = sessionStore.get("preemptive-test");
+    expect(saved[0].content).toContain("[Previous conversation summary]");
+  });
+
+  test("compacts session after memory flush to prevent repeated flush on next run", async () => {
+    // Token count in the flush zone (above soft threshold, below hard threshold)
+    const flushZoneTokens = CONTEXT_WINDOW - RESERVE_FLOOR - SOFT_THRESHOLD + 100;
+    const tool = buildStubTool("write_file", "ok");
+    const sessionStore = new SessionStore(tmpDir);
+    let callCount = 0;
+    const flushUsage = {
+      inputTokens: flushZoneTokens,
+      outputTokens: 50,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+    };
+
+    const ctx: AgentContext = {
+      authStorage: buildStubAuth(),
+      tools: [tool],
+      skills: [],
+      workspaceFiles: [],
+      sessionStore,
+      sessionKey: "flush-compact-test",
+      memoryIndex,
+      callLLM: async () => {
+        callCount++;
+        if (callCount === 1) {
+          // Initial response that puts us in the flush zone
+          return buildLLMResponse({
+            text: "Here's your answer",
+            stopReason: "end_turn",
+            usage: flushUsage,
+          });
+        }
+        if (callCount === 2) {
+          // Response to flush prompt — save memory via tool
+          return buildLLMResponse({
+            text: "",
+            toolCalls: [{ id: "tc1", name: "write_file", input: { path: "memory/2026-01-01.md" } }],
+            stopReason: "tool_use",
+            usage: flushUsage,
+          });
+        }
+        if (callCount === 3) {
+          // After tool execution, end turn
+          return buildLLMResponse({
+            text: "Memory saved",
+            stopReason: "end_turn",
+            usage: flushUsage,
+          });
+        }
+        // Summarization call during compaction
+        return buildLLMResponse({ text: "Summary of conversation" });
+      },
+    };
+
+    await runAgent(ctx, "trigger flush");
+
+    // Session should have been compacted (summary prepended)
+    const saved = sessionStore.get("flush-compact-test");
+    expect(saved[0].content).toContain("[Previous conversation summary]");
   });
 
   test("accepts LLMContentBlock[] as userMessage with image blocks", async () => {

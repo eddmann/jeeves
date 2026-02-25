@@ -13,7 +13,14 @@ import type { SessionStore } from "./session";
 import { log, formatError } from "./logger";
 import type { ProgressUpdate } from "./progress";
 import type { MemoryIndex } from "./memory/index";
-import { shouldFlush, shouldCompact, buildFlushPrompt, compactSession } from "./memory/compaction";
+import {
+  shouldFlush,
+  shouldCompact,
+  buildFlushPrompt,
+  compactSession,
+  estimateHistoryTokens,
+  CONTEXT_WINDOW,
+} from "./memory/compaction";
 
 export const MAX_ITERATIONS = 25;
 
@@ -89,6 +96,35 @@ export async function runAgent(
   let totalTokens = 0;
   let hasFlushed = false;
 
+  // Preemptive compaction: if history already exceeds context window, compact before calling LLM
+  const estimatedTokens = estimateHistoryTokens(history);
+  if (estimatedTokens >= CONTEXT_WINDOW) {
+    log.info("agent", "History exceeds context window, compacting before LLM call", {
+      estimatedTokens,
+    });
+
+    // Save new messages first (user message), then compact
+    ctx.sessionStore.append(ctx.sessionKey, sanitizeForPersist(newMessages));
+    newMessages.length = 0;
+
+    const result = await compactSession({
+      messages: history,
+      totalTokens: estimatedTokens,
+      callLLM: ctx.callLLM ?? callLLM,
+      authStorage: ctx.authStorage,
+    });
+
+    history.length = 0;
+    history.push(...result.messages);
+    ctx.sessionStore.compact(ctx.sessionKey, result.messages);
+
+    try {
+      await ctx.memoryIndex.sync();
+    } catch (err) {
+      log.warn("agent", "Memory index sync failed after preemptive compaction", formatError(err));
+    }
+  }
+
   // Agent loop
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     log.info("agent", "LLM iteration", { iteration: i + 1 });
@@ -151,6 +187,32 @@ export async function runAgent(
         newMessages.push(flushMsg);
         hasFlushed = true;
         continue;
+      }
+
+      // After flush, compact immediately to avoid re-triggering flush on next run
+      if (hasFlushed) {
+        log.info("agent", "Compacting session after memory flush", { totalTokens });
+        ctx.sessionStore.append(ctx.sessionKey, sanitizeForPersist(newMessages));
+        newMessages.length = 0;
+
+        const result = await compactSession({
+          messages: history,
+          totalTokens,
+          callLLM: ctx.callLLM ?? callLLM,
+          authStorage: ctx.authStorage,
+        });
+
+        history.length = 0;
+        history.push(...result.messages);
+        ctx.sessionStore.compact(ctx.sessionKey, result.messages);
+
+        try {
+          await ctx.memoryIndex.sync();
+        } catch (err) {
+          log.warn("agent", "Memory index sync failed after compaction", formatError(err));
+        }
+
+        return response.text;
       }
 
       ctx.sessionStore.append(ctx.sessionKey, sanitizeForPersist(newMessages));
