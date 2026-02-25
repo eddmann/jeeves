@@ -321,35 +321,23 @@ describe("session file indexing", () => {
     index.close();
   });
 
-  test("cleans up stale session entries when file no longer needs indexing", async () => {
-    // First sync: single file with a compaction marker — pre-marker content gets indexed
-    writeFileSync(
-      join(sessionsDir, "chat.jsonl"),
-      [
-        msg("user", "Tell me about volcanos."),
-        msg("assistant", "Volcanos erupt with lava."),
-        COMPACTION_MARKER,
-        msg("user", "[Summary] Discussed volcanos."),
-      ].join("\n"),
-    );
+  test("cleans up stale session entries when file is deleted", async () => {
+    // Archived file with searchable content
+    writeFileSync(join(sessionsDir, "chat.jsonl"), msg("user", "Tell me about volcanos."));
+    // Active file makes chat.jsonl archived
+    writeFileSync(join(sessionsDir, "chat.1.jsonl"), msg("user", "hi"));
 
     const index = createIndex(noopEmbedder);
     await index.sync();
     expect((await index.search("volcanos")).length).toBeGreaterThan(0);
 
-    // Rotation happens: old file archived, new file is now active with no marker
-    writeFileSync(join(sessionsDir, "chat.1.jsonl"), msg("user", "hi"));
-
-    // But also rewrite old file without the marker content (simulating a different scenario)
-    // The key case: active file loses its marker — stale entry should be cleaned up
-    writeFileSync(join(sessionsDir, "chat.1.jsonl"), msg("user", "Fresh start."));
+    // Delete the archived file
+    unlinkSync(join(sessionsDir, "chat.jsonl"));
 
     await index.sync();
 
-    // Old archived file is still indexed
-    expect((await index.search("volcanos")).length).toBeGreaterThan(0);
-    // New active file with no marker is not indexed
-    expect((await index.search("Fresh start")).length).toBe(0);
+    // Stale entries from deleted file are cleaned up
+    expect((await index.search("volcanos")).length).toBe(0);
 
     index.close();
   });
