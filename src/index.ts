@@ -141,6 +141,11 @@ async function main() {
       await withAgentLock(async () => {
         const ctx = makeAgentContext(`cron_${job.id}`);
         const response = await runAgent(ctx, job.message);
+        // Suppress CRON_OK — nothing to report
+        if (response.trim() === "CRON_OK") {
+          log.info("cron", "Suppressed CRON_OK", { name: job.name, id: job.id });
+          return;
+        }
         // Send cron output to channel if configured
         if (channel && chatId) {
           await channel.send(chatId, `[Cron: ${job.name}]\n${response}`);
