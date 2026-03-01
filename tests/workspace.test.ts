@@ -52,6 +52,37 @@ describe("workspace file loading", () => {
     expect(files[0].content.length).toBeLessThan(oversized.length);
     expect(files[0].content).toContain("truncated");
   });
+
+  test("includes the two most recent episodic memory files", () => {
+    const memoryDir = join(tmpDir, "memory");
+    mkdirSync(memoryDir, { recursive: true });
+    writeFileSync(join(memoryDir, "2026-02-27.md"), "old");
+    writeFileSync(join(memoryDir, "2026-02-28.md"), "yesterday");
+    writeFileSync(join(memoryDir, "2026-03-01.md"), "today");
+
+    const files = loadWorkspaceFiles(tmpDir);
+    const episodic = files.filter((f) => f.name.startsWith("memory/"));
+
+    expect(episodic.length).toBe(2);
+    expect(episodic[0].name).toBe("memory/2026-02-28.md");
+    expect(episodic[0].content).toBe("yesterday");
+    expect(episodic[1].name).toBe("memory/2026-03-01.md");
+    expect(episodic[1].content).toBe("today");
+  });
+
+  test("ignores non-daily files in episodic memory directory", () => {
+    const memoryDir = join(tmpDir, "memory");
+    mkdirSync(memoryDir, { recursive: true });
+    writeFileSync(join(memoryDir, "2026-03-01.md"), "today");
+    writeFileSync(join(memoryDir, "notes.md"), "ignored");
+    writeFileSync(join(memoryDir, "README.txt"), "ignored");
+
+    const files = loadWorkspaceFiles(tmpDir);
+    const episodic = files.filter((f) => f.name.startsWith("memory/"));
+
+    expect(episodic.length).toBe(1);
+    expect(episodic[0].name).toBe("memory/2026-03-01.md");
+  });
 });
 
 describe("workspace initialization", () => {

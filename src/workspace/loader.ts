@@ -21,6 +21,8 @@ export interface WorkspaceFile {
 }
 
 const MAX_FILE_SIZE = 20000;
+const EPISODIC_MEMORY_LIMIT = 2;
+const EPISODIC_MEMORY_FILE = /^(\d{4}-\d{2}-\d{2})\.md$/;
 
 /**
  * Truncate content to a max size, preserving head and tail.
@@ -32,6 +34,40 @@ function truncateContent(content: string, max: number): string {
   const tailSize = Math.floor(max * 0.2);
   const marker = `\n\n... [truncated ${content.length - headSize - tailSize} chars] ...\n\n`;
   return content.slice(0, headSize) + marker + content.slice(-tailSize);
+}
+
+/** Load recent daily episodic memory files from workspace/memory/YYYY-MM-DD.md. */
+function loadRecentEpisodicMemoryFiles(workspaceDir: string): WorkspaceFile[] {
+  const memoryDir = join(workspaceDir, "memory");
+  if (!existsSync(memoryDir)) return [];
+
+  let entries: string[];
+  try {
+    entries = readdirSync(memoryDir);
+  } catch {
+    return [];
+  }
+
+  const selected = entries
+    .filter((entry) => EPISODIC_MEMORY_FILE.test(entry))
+    .sort((a, b) => b.localeCompare(a))
+    .slice(0, EPISODIC_MEMORY_LIMIT)
+    .sort((a, b) => a.localeCompare(b));
+
+  const files: WorkspaceFile[] = [];
+  for (const entry of selected) {
+    const filePath = join(memoryDir, entry);
+    try {
+      const raw = readFileSync(filePath, "utf-8");
+      files.push({
+        name: `memory/${entry}`,
+        content: truncateContent(raw, MAX_FILE_SIZE),
+      });
+    } catch {
+      // Skip unreadable files
+    }
+  }
+  return files;
 }
 
 /**
@@ -54,6 +90,8 @@ export function loadWorkspaceFiles(workspaceDir: string): WorkspaceFile[] {
       }
     }
   }
+
+  files.push(...loadRecentEpisodicMemoryFiles(workspaceDir));
 
   return files;
 }

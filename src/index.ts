@@ -111,9 +111,6 @@ async function main() {
   initWorkspace(workspaceDir, templateDir);
   loadWorkspaceEnv(workspaceDir);
 
-  // Load workspace files
-  const workspaceFiles = loadWorkspaceFiles(workspaceDir);
-
   // Skill directories
   const skillDirs = [join(rootDir, "skills"), join(workspaceDir, "skills")];
 
@@ -157,13 +154,13 @@ async function main() {
   // Create tools (needs cron scheduler)
   const tools = allTools({ cronScheduler, workspaceDir, memoryIndex });
 
-  // Helper to create agent context — reloads skills fresh each run
+  // Helper to create agent context — reloads skills and workspace files fresh each run
   function makeAgentContext(sessionKey: string): AgentContext {
     return {
       authStorage,
       tools,
       skills: loadSkillsFromDirs(skillDirs),
-      workspaceFiles,
+      workspaceFiles: loadWorkspaceFiles(workspaceDir),
       sessionStore,
       sessionKey,
       memoryIndex,
