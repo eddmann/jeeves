@@ -49,6 +49,13 @@ export interface LLMResponse {
   };
 }
 
+export class LLMTimeoutError extends Error {
+  constructor(message = "LLM request timed out") {
+    super(message);
+    this.name = "LLMTimeoutError";
+  }
+}
+
 export async function callLLM(opts: {
   messages: LLMMessage[];
   tools: LLMTool[];
@@ -171,7 +178,7 @@ export async function callLLM(opts: {
   let response: Anthropic.Message;
   try {
     const timeout = new Promise<never>((_, rej) =>
-      setTimeout(() => rej(new Error("LLM request timed out")), LLM_TIMEOUT_MS),
+      setTimeout(() => rej(new LLMTimeoutError()), LLM_TIMEOUT_MS),
     );
     response = await Promise.race([stream.finalMessage(), timeout]);
   } catch (err) {

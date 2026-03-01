@@ -5,6 +5,8 @@ import {
   ITERATION_WARNING_THRESHOLD,
   FINALIZATION_WARNING_THRESHOLD,
   MAX_ITERATIONS_FALLBACK_MESSAGE,
+  LLM_TIMEOUT_RETRIES,
+  LLM_TIMEOUT_FALLBACK_MESSAGE,
   sanitizeForPersist,
   formatTimestamp,
   formatIterationWarning,
@@ -14,7 +16,12 @@ import {
 import { SessionStore } from "../src/session";
 import { buildSystemPrompt } from "../src/workspace/prompt";
 import { formatSkillsForPrompt } from "../src/skills/prompt";
-import type { LLMResponse, LLMContentBlock, LLMMessage } from "../src/llm";
+import {
+  LLMTimeoutError,
+  type LLMResponse,
+  type LLMContentBlock,
+  type LLMMessage,
+} from "../src/llm";
 import type { ProgressUpdate } from "../src/progress";
 import { CONTEXT_WINDOW, RESERVE_FLOOR, SOFT_THRESHOLD } from "../src/memory/compaction";
 import { createTempDir, cleanupTempDir } from "./helpers/temp-dir";
@@ -168,6 +175,76 @@ describe("agent loop", () => {
 
     expect(result).toBe(MAX_ITERATIONS_FALLBACK_MESSAGE);
     expect(ctx.callCount).toBe(MAX_ITERATIONS);
+  });
+
+  test("retries once when the LLM times out and then succeeds", async () => {
+    let callCount = 0;
+    const ctx: AgentContext = {
+      authStorage: buildStubAuth(),
+      tools: [],
+      skills: [],
+      workspaceFiles: [],
+      sessionStore: new SessionStore(tmpDir),
+      sessionKey: "timeout-retry-success",
+      memoryIndex,
+      callLLM: async () => {
+        callCount++;
+        if (callCount === 1) {
+          throw new LLMTimeoutError();
+        }
+        return buildLLMResponse({ text: "recovered" });
+      },
+    };
+
+    const result = await runAgent(ctx, "hello");
+
+    expect(result).toBe("recovered");
+    expect(callCount).toBe(2);
+  });
+
+  test("returns timeout fallback after exhausting retries", async () => {
+    let callCount = 0;
+    const sessionStore = new SessionStore(tmpDir);
+    const ctx: AgentContext = {
+      authStorage: buildStubAuth(),
+      tools: [],
+      skills: [],
+      workspaceFiles: [],
+      sessionStore,
+      sessionKey: "timeout-retry-exhausted",
+      memoryIndex,
+      callLLM: async () => {
+        callCount++;
+        throw new LLMTimeoutError();
+      },
+    };
+
+    const result = await runAgent(ctx, "hello");
+
+    expect(result).toBe(LLM_TIMEOUT_FALLBACK_MESSAGE);
+    expect(callCount).toBe(LLM_TIMEOUT_RETRIES + 1);
+    const saved = sessionStore.get("timeout-retry-exhausted");
+    expect(saved.length).toBeGreaterThan(0);
+  });
+
+  test("does not retry non-timeout LLM errors", async () => {
+    let callCount = 0;
+    const ctx: AgentContext = {
+      authStorage: buildStubAuth(),
+      tools: [],
+      skills: [],
+      workspaceFiles: [],
+      sessionStore: new SessionStore(tmpDir),
+      sessionKey: "non-timeout-error",
+      memoryIndex,
+      callLLM: async () => {
+        callCount++;
+        throw new Error("upstream failure");
+      },
+    };
+
+    await expect(runAgent(ctx, "hello")).rejects.toThrow("upstream failure");
+    expect(callCount).toBe(1);
   });
 
   test("returns graceful message for unknown tool names", async () => {

@@ -3,7 +3,13 @@
  */
 
 import type { AuthStorage } from "./auth/storage";
-import { callLLM, type LLMContentBlock, type LLMMessage } from "./llm";
+import {
+  callLLM,
+  LLMTimeoutError,
+  type LLMContentBlock,
+  type LLMMessage,
+  type LLMResponse,
+} from "./llm";
 import type { Tool } from "./tools/index";
 import type { Skill } from "./skills/loader";
 import type { WorkspaceFile } from "./workspace/loader";
@@ -27,6 +33,10 @@ export const ITERATION_WARNING_THRESHOLD = 5;
 export const FINALIZATION_WARNING_THRESHOLD = 3;
 export const MAX_ITERATIONS_FALLBACK_MESSAGE =
   "I hit my step limit before finishing. Reply with `continue` to resume, or narrow the task.";
+export const LLM_TIMEOUT_RETRIES = 2;
+export const LLM_TIMEOUT_BASE_BACKOFF_MS = 500;
+export const LLM_TIMEOUT_FALLBACK_MESSAGE =
+  "The model timed out while thinking. I saved progress. Reply with `continue` to resume.";
 
 /** Format current time as a short prefix for the user message. */
 export function formatTimestamp(now: Date = new Date()): string {
@@ -51,6 +61,11 @@ export function formatFinalizationPrompt(iteration: number, max: number): string
     "Do not start new tool chains. Prioritize finishing with a final answer. " +
     "Summarize what is complete, what is pending, and any follow-up needed.]"
   );
+}
+
+/** Identify timeout failures from the LLM client. */
+export function isLLMTimeoutError(err: unknown): boolean {
+  return err instanceof LLMTimeoutError;
 }
 
 export interface AgentContext {
@@ -179,12 +194,41 @@ export async function runAgent(
     log.info("agent", "LLM iteration", { iteration });
     await onProgress?.({ type: "thinking", iteration });
     const llmFn = ctx.callLLM ?? callLLM;
-    const response = await llmFn({
-      messages: history,
-      tools: isFinalIteration ? [] : llmTools,
-      systemPrompt,
-      authStorage: ctx.authStorage,
-    });
+    let response: LLMResponse | null = null;
+    for (let attempt = 0; attempt <= LLM_TIMEOUT_RETRIES; attempt++) {
+      try {
+        response = await llmFn({
+          messages: history,
+          tools: isFinalIteration ? [] : llmTools,
+          systemPrompt,
+          authStorage: ctx.authStorage,
+        });
+        break;
+      } catch (err) {
+        if (!isLLMTimeoutError(err)) throw err;
+        const attemptNumber = attempt + 1;
+        const maxAttempts = LLM_TIMEOUT_RETRIES + 1;
+        const hasRetryLeft = attempt < LLM_TIMEOUT_RETRIES;
+        log.warn("agent", "LLM timeout", {
+          iteration,
+          attempt: attemptNumber,
+          maxAttempts,
+          retrying: hasRetryLeft,
+        });
+
+        if (!hasRetryLeft) {
+          ctx.sessionStore.append(ctx.sessionKey, sanitizeForPersist(newMessages));
+          return LLM_TIMEOUT_FALLBACK_MESSAGE;
+        }
+
+        const backoffMs = LLM_TIMEOUT_BASE_BACKOFF_MS * attemptNumber;
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      }
+    }
+    if (!response) {
+      ctx.sessionStore.append(ctx.sessionKey, sanitizeForPersist(newMessages));
+      return LLM_TIMEOUT_FALLBACK_MESSAGE;
+    }
 
     const toolCalls = isFinalIteration ? [] : response.toolCalls;
 
