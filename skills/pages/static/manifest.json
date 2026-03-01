@@ -1,0 +1,17 @@
+{
+  "name": "Jeeves",
+  "short_name": "Jeeves",
+  "description": "At your disposal, sir.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a2e",
+  "theme_color": "#1a1a2e",
+  "icons": [
+    {
+      "src": "/static/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

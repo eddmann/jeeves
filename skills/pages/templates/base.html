@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#1a1a2e">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Jeeves">
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/static/icon.svg">
+    <title>{{ title | default("Jeeves") }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        bg: '#1a1a2e',
+                        card: '#16213e',
+                        border: '#2a2a4a',
+                        accent: '#e94560',
+                        muted: '#8a8a9a',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .safe-top { padding-top: calc(1rem + env(safe-area-inset-top, 0px)); }
+        .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0); }
+        .content-pad { padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px)); }
+    </style>
+</head>
+<body class="bg-bg text-gray-200 antialiased min-h-screen max-w-3xl mx-auto px-4 safe-top">
+    <div class="content-pad">
+        {% block content %}{% if content is defined %}{{ content | safe }}{% endif %}{% endblock %}
+    </div>
+    <nav class="fixed bottom-0 left-0 right-0 flex bg-card border-t border-border z-50 safe-bottom">
+        <a href="/" class="flex-1 flex flex-col items-center justify-center py-2 no-underline transition-colors {{ 'text-accent' if active == '/' else 'text-muted hover:text-gray-200' }}">
+            <span class="text-xl leading-none mb-0.5">🎩</span>
+            <span class="text-[0.65rem] font-semibold uppercase tracking-tight">Home</span>
+        </a>
+        {% for page in nav_pages %}
+        <a href="/{{ page.slug }}" class="flex-1 flex flex-col items-center justify-center py-2 no-underline transition-colors {{ 'text-accent' if active == page.slug else 'text-muted hover:text-gray-200' }}">
+            <span class="text-xl leading-none mb-0.5">{{ page.icon }}</span>
+            <span class="text-[0.65rem] font-semibold uppercase tracking-tight">{{ page.title }}</span>
+        </a>
+        {% endfor %}
+    </nav>
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/static/sw.js');
+        }
+    </script>
+</body>
+</html>

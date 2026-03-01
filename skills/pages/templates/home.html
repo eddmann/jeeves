@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-3xl font-bold mb-1">🎩 Jeeves</h1>
+<p class="text-muted text-sm mb-6">At your disposal, sir.</p>
+
+{% if pages %}
+<div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+    {% for page in pages %}
+    <a href="/{{ page.slug }}" class="bg-card border border-border rounded-xl p-6 flex flex-col items-center text-center no-underline text-inherit hover:border-accent transition-colors">
+        <span class="text-3xl mb-2">{{ page.icon }}</span>
+        <span class="text-sm font-semibold">{{ page.title }}</span>
+    </a>
+    {% endfor %}
+</div>
+{% else %}
+<div class="bg-card border border-border rounded-xl p-5">
+    <p class="text-muted">No pages yet.</p>
+</div>
+{% endif %}
+{% endblock %}
