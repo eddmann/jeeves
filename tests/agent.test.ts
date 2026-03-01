@@ -593,7 +593,10 @@ describe("agent loop", () => {
       },
     };
 
-    await runAgent(ctx, "trigger flush");
+    const result = await runAgent(ctx, "trigger flush");
+
+    // Flush turn stays silent to the user; return the pre-flush user-facing answer.
+    expect(result).toBe("Here's your answer");
 
     // Session should have been compacted (summary prepended)
     const saved = sessionStore.get("flush-compact-test");
@@ -699,6 +702,68 @@ describe("agent loop", () => {
     expect(callCount).toBe(MAX_ITERATIONS);
     expect(toolsPerCall[MAX_ITERATIONS - 1]).toBe(0);
     expect(tool.calls.length).toBe(MAX_ITERATIONS - 1);
+  });
+
+  test("runs out-of-band flush on final iteration when near context limit", async () => {
+    const tool = buildStubTool("bash", "ok");
+    let callCount = 0;
+    let sawFlushPrompt = false;
+    const flushZoneTokens = CONTEXT_WINDOW - RESERVE_FLOOR - SOFT_THRESHOLD + 100;
+    const sessionStore = new SessionStore(tmpDir);
+
+    const ctx: AgentContext = {
+      authStorage: buildStubAuth(),
+      tools: [tool],
+      skills: [],
+      workspaceFiles: [],
+      sessionStore,
+      sessionKey: "final-iteration-flush",
+      memoryIndex,
+      callLLM: async (opts) => {
+        callCount++;
+        const last = opts.messages[opts.messages.length - 1];
+        const lastText =
+          typeof last?.content === "string"
+            ? last.content
+            : last?.content
+                ?.filter((b) => b.type === "text")
+                .map((b) => b.text)
+                .join(" ") ?? "";
+        if (lastText.includes("Pre-compaction memory flush.")) {
+          sawFlushPrompt = true;
+        }
+
+        if (callCount < MAX_ITERATIONS) {
+          return buildLLMResponse({
+            text: "",
+            toolCalls: [{ id: `tc${callCount}`, name: "bash", input: {} }],
+            stopReason: "tool_use",
+          });
+        }
+        if (callCount === MAX_ITERATIONS) {
+          return buildLLMResponse({
+            text: "final answer",
+            stopReason: "end_turn",
+            usage: {
+              inputTokens: flushZoneTokens,
+              outputTokens: 50,
+              cacheCreationInputTokens: 0,
+              cacheReadInputTokens: 0,
+            },
+          });
+        }
+        if (callCount === MAX_ITERATIONS + 1) {
+          return buildLLMResponse({ text: "", stopReason: "end_turn" });
+        }
+        return buildLLMResponse({ text: "Summary of conversation" });
+      },
+    };
+
+    const result = await runAgent(ctx, "go");
+
+    expect(result).toBe("final answer");
+    expect(sawFlushPrompt).toBe(true);
+    expect(callCount).toBe(MAX_ITERATIONS + 2); // flush turn + compaction summarization
   });
 });
 

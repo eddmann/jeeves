@@ -20,8 +20,7 @@ import { log, formatError } from "./logger";
 import type { ProgressUpdate } from "./progress";
 import type { MemoryIndex } from "./memory/index";
 import {
-  shouldFlush,
-  shouldCompact,
+  shouldFlushAndCompact,
   buildFlushPrompt,
   compactSession,
   estimateHistoryTokens,
@@ -37,6 +36,7 @@ export const LLM_TIMEOUT_RETRIES = 2;
 export const LLM_TIMEOUT_BASE_BACKOFF_MS = 500;
 export const LLM_TIMEOUT_FALLBACK_MESSAGE =
   "The model timed out while thinking. I saved progress. Reply with `continue` to resume.";
+export const MAX_FLUSH_TURNS = 8;
 
 /** Format current time as a short prefix for the user message. */
 export function formatTimestamp(now: Date = new Date()): string {
@@ -88,6 +88,163 @@ export function sanitizeForPersist(messages: LLMMessage[]): LLMMessage[] {
       return block;
     });
     return { role: msg.role, content: sanitized };
+  });
+}
+
+async function compactAndSync(opts: {
+  ctx: AgentContext;
+  history: LLMMessage[];
+  newMessages: LLMMessage[];
+  totalTokens: number;
+  llmFn: typeof callLLM;
+  reason: string;
+}): Promise<void> {
+  log.info("agent", opts.reason, { totalTokens: opts.totalTokens });
+
+  // Append new messages first (preserves originals in the file)
+  opts.ctx.sessionStore.append(opts.ctx.sessionKey, sanitizeForPersist(opts.newMessages));
+  opts.newMessages.length = 0;
+
+  const result = await compactSession({
+    messages: opts.history,
+    totalTokens: opts.totalTokens,
+    callLLM: opts.llmFn,
+    authStorage: opts.ctx.authStorage,
+  });
+
+  // Replace working history in memory
+  opts.history.length = 0;
+  opts.history.push(...result.messages);
+
+  // Write compaction marker + compacted messages
+  opts.ctx.sessionStore.compact(opts.ctx.sessionKey, result.messages);
+
+  // Re-sync memory index after compaction
+  try {
+    await opts.ctx.memoryIndex.sync();
+  } catch (err) {
+    log.warn("agent", "Memory index sync failed after compaction", formatError(err));
+  }
+}
+
+async function runFlushAndCompact(opts: {
+  ctx: AgentContext;
+  history: LLMMessage[];
+  newMessages: LLMMessage[];
+  llmFn: typeof callLLM;
+  llmTools: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>;
+  toolMap: Map<string, Tool>;
+  systemPrompt: string;
+  totalTokens: number;
+}): Promise<void> {
+  const flushMsg: LLMMessage = { role: "user", content: buildFlushPrompt() };
+  opts.history.push(flushMsg);
+  opts.newMessages.push(flushMsg);
+
+  let flushTokens = opts.totalTokens;
+  for (let flushTurn = 1; flushTurn <= MAX_FLUSH_TURNS; flushTurn++) {
+    let response: LLMResponse | null = null;
+    for (let attempt = 0; attempt <= LLM_TIMEOUT_RETRIES; attempt++) {
+      try {
+        response = await opts.llmFn({
+          messages: opts.history,
+          tools: opts.llmTools,
+          systemPrompt: opts.systemPrompt,
+          authStorage: opts.ctx.authStorage,
+        });
+        break;
+      } catch (err) {
+        if (!isLLMTimeoutError(err)) {
+          throw err;
+        }
+        const attemptNumber = attempt + 1;
+        const maxAttempts = LLM_TIMEOUT_RETRIES + 1;
+        const hasRetryLeft = attempt < LLM_TIMEOUT_RETRIES;
+        log.warn("agent", "LLM timeout during flush turn", {
+          flushTurn,
+          attempt: attemptNumber,
+          maxAttempts,
+          retrying: hasRetryLeft,
+        });
+        if (!hasRetryLeft) break;
+        const backoffMs = LLM_TIMEOUT_BASE_BACKOFF_MS * attemptNumber;
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      }
+    }
+    if (!response) break;
+
+    const toolCalls = response.toolCalls;
+    flushTokens =
+      response.usage.inputTokens +
+      response.usage.outputTokens +
+      response.usage.cacheCreationInputTokens +
+      response.usage.cacheReadInputTokens;
+
+    const assistantContent: LLMContentBlock[] = [];
+    if (response.text) {
+      assistantContent.push({ type: "text", text: response.text });
+    }
+    for (const tc of toolCalls) {
+      assistantContent.push({
+        type: "tool_use",
+        id: tc.id,
+        name: tc.name,
+        input: tc.input,
+      });
+    }
+
+    const assistantMsg: LLMMessage = {
+      role: "assistant",
+      content:
+        assistantContent.length === 1 && assistantContent[0].type === "text"
+          ? assistantContent[0].text
+          : assistantContent,
+    };
+    opts.history.push(assistantMsg);
+    opts.newMessages.push(assistantMsg);
+
+    if (response.stopReason === "end_turn" || toolCalls.length === 0) {
+      break;
+    }
+
+    const toolResults: LLMContentBlock[] = [];
+    for (const tc of toolCalls) {
+      const tool = opts.toolMap.get(tc.name);
+      let result: string;
+      const toolStart = Date.now();
+      if (tool) {
+        try {
+          result = await tool.execute(tc.input);
+        } catch (err) {
+          result = `Tool error: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      } else {
+        result = `Unknown tool: ${tc.name}`;
+      }
+      log.debug("agent", "Flush tool result", {
+        name: tc.name,
+        chars: result.length,
+        ms: Date.now() - toolStart,
+      });
+      toolResults.push({
+        type: "tool_result",
+        tool_use_id: tc.id,
+        content: result,
+      });
+    }
+
+    const toolResultMsg: LLMMessage = { role: "user", content: toolResults };
+    opts.history.push(toolResultMsg);
+    opts.newMessages.push(toolResultMsg);
+  }
+
+  await compactAndSync({
+    ctx: opts.ctx,
+    history: opts.history,
+    newMessages: opts.newMessages,
+    totalTokens: flushTokens,
+    llmFn: opts.llmFn,
+    reason: "Compacting session after out-of-band memory flush",
   });
 }
 
@@ -143,7 +300,6 @@ export async function runAgent(
 
   // Compaction state
   let totalTokens = 0;
-  let hasFlushed = false;
   let hasInjectedFinalizationPrompt = false;
 
   // Preemptive compaction: if history already exceeds context window, compact before calling LLM
@@ -245,6 +401,7 @@ export async function runAgent(
       cacheCreation: response.usage.cacheCreationInputTokens,
       cacheRead: response.usage.cacheReadInputTokens,
     });
+    const shouldFlushAndCompactNow = shouldFlushAndCompact(totalTokens);
 
     // Build assistant content blocks
     const assistantContent: LLMContentBlock[] = [];
@@ -277,38 +434,18 @@ export async function runAgent(
         isFinalIteration && !response.text.trim() ? MAX_ITERATIONS_FALLBACK_MESSAGE : response.text;
 
       // Check for memory flush before saving
-      if (shouldFlush(totalTokens) && !hasFlushed && !isFinalIteration) {
-        log.info("agent", "Injecting memory flush prompt before session end");
-        const flushMsg: LLMMessage = { role: "user", content: buildFlushPrompt() };
-        history.push(flushMsg);
-        newMessages.push(flushMsg);
-        hasFlushed = true;
-        continue;
-      }
-
-      // After flush, compact immediately to avoid re-triggering flush on next run
-      if (hasFlushed) {
-        log.info("agent", "Compacting session after memory flush", { totalTokens });
-        ctx.sessionStore.append(ctx.sessionKey, sanitizeForPersist(newMessages));
-        newMessages.length = 0;
-
-        const result = await compactSession({
-          messages: history,
+      if (shouldFlushAndCompactNow) {
+        log.info("agent", "Running out-of-band memory flush before session end");
+        await runFlushAndCompact({
+          ctx,
+          history,
+          newMessages,
+          llmFn,
+          llmTools,
+          toolMap,
+          systemPrompt,
           totalTokens,
-          callLLM: ctx.callLLM ?? callLLM,
-          authStorage: ctx.authStorage,
         });
-
-        history.length = 0;
-        history.push(...result.messages);
-        ctx.sessionStore.compact(ctx.sessionKey, result.messages);
-
-        try {
-          await ctx.memoryIndex.sync();
-        } catch (err) {
-          log.warn("agent", "Memory index sync failed after compaction", formatError(err));
-        }
-
         return finalResponseText;
       }
 
@@ -362,47 +499,22 @@ export async function runAgent(
     newMessages.push(toolResultMsg);
 
     // Memory flush check
-    if (shouldFlush(totalTokens) && !hasFlushed) {
-      log.info("agent", "Injecting memory flush prompt", { totalTokens });
-      const flushMsg: LLMMessage = { role: "user", content: buildFlushPrompt() };
-      history.push(flushMsg);
-      newMessages.push(flushMsg);
-      hasFlushed = true;
+    if (shouldFlushAndCompactNow) {
+      log.info("agent", "Running out-of-band memory flush", { totalTokens });
+      await runFlushAndCompact({
+        ctx,
+        history,
+        newMessages,
+        llmFn,
+        llmTools,
+        toolMap,
+        systemPrompt,
+        totalTokens,
+      });
+      totalTokens = 0;
       continue;
     }
 
-    // Compaction check
-    if (shouldCompact(totalTokens)) {
-      log.info("agent", "Compacting session", { totalTokens });
-
-      // Append new messages first (preserves originals in the file)
-      ctx.sessionStore.append(ctx.sessionKey, sanitizeForPersist(newMessages));
-      newMessages.length = 0;
-
-      const result = await compactSession({
-        messages: history,
-        totalTokens,
-        callLLM: ctx.callLLM ?? callLLM,
-        authStorage: ctx.authStorage,
-      });
-
-      // Replace working history in memory
-      history.length = 0;
-      history.push(...result.messages);
-
-      // Write compaction marker + compacted messages
-      ctx.sessionStore.compact(ctx.sessionKey, result.messages);
-
-      // Re-sync memory index after compaction
-      try {
-        await ctx.memoryIndex.sync();
-      } catch (err) {
-        log.warn("agent", "Memory index sync failed after compaction", formatError(err));
-      }
-
-      hasFlushed = false;
-      totalTokens = 0;
-    }
   }
 
   // Max iterations reached

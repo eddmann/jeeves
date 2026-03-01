@@ -35,25 +35,19 @@ export function estimateHistoryTokens(messages: LLMMessage[]): number {
   return messages.reduce((sum, msg) => sum + estimateMessageTokens(msg), 0);
 }
 
-/** Returns true when context is approaching capacity. */
-export function shouldFlush(totalTokens: number): boolean {
+/** Returns true when context should run flush+compact. */
+export function shouldFlushAndCompact(totalTokens: number): boolean {
   return totalTokens >= CONTEXT_WINDOW - RESERVE_FLOOR - SOFT_THRESHOLD;
-}
-
-/** Returns true when context is over capacity and compaction is needed. */
-export function shouldCompact(totalTokens: number): boolean {
-  return totalTokens > CONTEXT_WINDOW - RESERVE_FLOOR;
 }
 
 /** Build the flush prompt asking Claude to save important context to memory. */
 export function buildFlushPrompt(): string {
   const date = new Date().toISOString().split("T")[0];
-  return (
-    "You are about to run out of conversation context. Review our conversation and save any " +
-    "important facts, decisions, ongoing tasks, or context to memory files using write_file. " +
-    `Write to \`memory/${date}.md\`. Focus on information that would be lost and would be ` +
-    "useful in future conversations."
-  );
+  return [
+    "Pre-compaction memory flush.",
+    `Store durable memories now (use memory/${date}.md; create memory/ if needed).`,
+    "IMPORTANT: If the file already exists, APPEND new content only and do not overwrite existing entries.",
+  ].join(" ");
 }
 
 /** Repair orphaned tool_result blocks that have no matching tool_use in the history. */

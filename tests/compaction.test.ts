@@ -2,8 +2,7 @@ import { describe, test, expect } from "bun:test";
 import {
   estimateMessageTokens,
   estimateHistoryTokens,
-  shouldFlush,
-  shouldCompact,
+  shouldFlushAndCompact,
   buildFlushPrompt,
   repairOrphanedToolResults,
   summarizeMessages,
@@ -80,40 +79,31 @@ describe("estimateHistoryTokens", () => {
   });
 });
 
-describe("shouldFlush", () => {
+describe("shouldFlushAndCompact", () => {
   test("returns false when well within budget", () => {
-    expect(shouldFlush(100_000)).toBe(false);
+    expect(shouldFlushAndCompact(100_000)).toBe(false);
   });
 
   test("returns true when approaching limit", () => {
     const threshold = CONTEXT_WINDOW - RESERVE_FLOOR - SOFT_THRESHOLD;
-    expect(shouldFlush(threshold)).toBe(true);
-    expect(shouldFlush(threshold + 1)).toBe(true);
+    expect(shouldFlushAndCompact(threshold)).toBe(true);
+    expect(shouldFlushAndCompact(threshold + 1)).toBe(true);
   });
 
   test("returns false just below threshold", () => {
     const threshold = CONTEXT_WINDOW - RESERVE_FLOOR - SOFT_THRESHOLD;
-    expect(shouldFlush(threshold - 1)).toBe(false);
-  });
-});
-
-describe("shouldCompact", () => {
-  test("returns false when within budget", () => {
-    expect(shouldCompact(100_000)).toBe(false);
-  });
-
-  test("returns true when over limit", () => {
-    const limit = CONTEXT_WINDOW - RESERVE_FLOOR;
-    expect(shouldCompact(limit + 1)).toBe(true);
+    expect(shouldFlushAndCompact(threshold - 1)).toBe(false);
   });
 });
 
 describe("buildFlushPrompt", () => {
-  test("includes instructions to save to memory files", () => {
+  test("enforces append-only daily memory write contract", () => {
     const prompt = buildFlushPrompt();
 
-    expect(prompt).toContain("write_file");
-    expect(prompt).toContain("memory/");
+    expect(prompt).toContain("Pre-compaction memory flush.");
+    expect(prompt).toMatch(/memory\/\d{4}-\d{2}-\d{2}\.md/);
+    expect(prompt).toContain("APPEND");
+    expect(prompt).toContain("do not overwrite");
   });
 
   test("includes current date in memory file path", () => {
