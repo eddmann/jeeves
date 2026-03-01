@@ -3,9 +3,12 @@ import {
   runAgent,
   MAX_ITERATIONS,
   ITERATION_WARNING_THRESHOLD,
+  FINALIZATION_WARNING_THRESHOLD,
+  MAX_ITERATIONS_FALLBACK_MESSAGE,
   sanitizeForPersist,
   formatTimestamp,
   formatIterationWarning,
+  formatFinalizationPrompt,
   type AgentContext,
 } from "../src/agent";
 import { SessionStore } from "../src/session";
@@ -149,7 +152,7 @@ describe("agent loop", () => {
     expect(ctx.callCount).toBe(3);
   });
 
-  test("stops at the iteration limit and returns sentinel string", async () => {
+  test("returns fallback text when it cannot finish before hitting the limit", async () => {
     const tool = buildStubTool("bash", "ok");
     const neverEnding = buildLLMResponse({
       text: "",
@@ -163,7 +166,7 @@ describe("agent loop", () => {
 
     const result = await runAgent(ctx, "infinite loop");
 
-    expect(result).toBe("(Agent reached maximum iterations)");
+    expect(result).toBe(MAX_ITERATIONS_FALLBACK_MESSAGE);
     expect(ctx.callCount).toBe(MAX_ITERATIONS);
   });
 
@@ -586,6 +589,40 @@ describe("agent loop", () => {
     expect(blocks.some((b) => b.type === "image")).toBe(false);
     expect(blocks).toContainEqual({ type: "text", text: "[Image]" });
   });
+
+  test("disables tools on the final iteration to force wrap-up", async () => {
+    const tool = buildStubTool("bash", "ok");
+    const toolsPerCall: number[] = [];
+    let callCount = 0;
+    const ctx: AgentContext = {
+      authStorage: buildStubAuth(),
+      tools: [tool],
+      skills: [],
+      workspaceFiles: [],
+      sessionStore: new SessionStore(tmpDir),
+      sessionKey: "force-wrapup",
+      memoryIndex,
+      callLLM: async (opts) => {
+        callCount++;
+        toolsPerCall.push(opts.tools.length);
+        if (callCount < MAX_ITERATIONS) {
+          return buildLLMResponse({
+            text: "",
+            toolCalls: [{ id: `tc${callCount}`, name: "bash", input: {} }],
+            stopReason: "tool_use",
+          });
+        }
+        return buildLLMResponse({ text: "final answer", stopReason: "end_turn" });
+      },
+    };
+
+    const result = await runAgent(ctx, "go");
+
+    expect(result).toBe("final answer");
+    expect(callCount).toBe(MAX_ITERATIONS);
+    expect(toolsPerCall[MAX_ITERATIONS - 1]).toBe(0);
+    expect(tool.calls.length).toBe(MAX_ITERATIONS - 1);
+  });
 });
 
 describe("sanitizeForPersist", () => {
@@ -721,6 +758,16 @@ describe("formatIterationWarning", () => {
   });
 });
 
+describe("formatFinalizationPrompt", () => {
+  test("includes the remaining iteration count and wrap-up instruction", () => {
+    const result = formatFinalizationPrompt(23, 25);
+
+    expect(result).toContain("2 iterations remaining");
+    expect(result).toContain("Do not start new tool chains");
+    expect(result).toContain("Prioritize finishing with a final answer");
+  });
+});
+
 describe("agent information sharing", () => {
   test("prepends timestamp to string user messages", async () => {
     setSystemTime(new Date("2025-03-15T10:30:00Z"));
@@ -815,6 +862,47 @@ describe("agent information sharing", () => {
     });
 
     expect(hasWarning).toBe(true);
+  });
+
+  test("injects finalization prompt near the loop limit", async () => {
+    const firstFinalizationIteration = MAX_ITERATIONS - FINALIZATION_WARNING_THRESHOLD;
+    const tool = buildStubTool("bash", "ok");
+    const allMessages: LLMMessage[][] = [];
+    let callCount = 0;
+
+    const ctx: AgentContext = {
+      authStorage: buildStubAuth(),
+      tools: [tool],
+      skills: [],
+      workspaceFiles: [],
+      sessionStore: new SessionStore(tmpDir),
+      sessionKey: "test-session",
+      memoryIndex,
+      callLLM: async (opts) => {
+        callCount++;
+        allMessages.push([...opts.messages]);
+        if (callCount <= firstFinalizationIteration) {
+          return buildLLMResponse({
+            text: "",
+            toolCalls: [{ id: `tc${callCount}`, name: "bash", input: {} }],
+            stopReason: "tool_use",
+          });
+        }
+        return buildLLMResponse({ text: "done" });
+      },
+    };
+
+    await runAgent(ctx, "go");
+
+    const msgsAtFirstFinalizationCall = allMessages[firstFinalizationIteration - 1];
+    const hasFinalizationPrompt = msgsAtFirstFinalizationCall.some((m) => {
+      if (typeof m.content === "string") return m.content.includes("Do not start new tool chains");
+      return m.content.some(
+        (b) => b.type === "text" && b.text.includes("Do not start new tool chains"),
+      );
+    });
+
+    expect(hasFinalizationPrompt).toBe(true);
   });
 
   test("does not inject iteration warning during early iterations", async () => {

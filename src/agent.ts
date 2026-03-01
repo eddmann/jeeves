@@ -23,7 +23,10 @@ import {
 } from "./memory/compaction";
 
 export const MAX_ITERATIONS = 25;
-export const ITERATION_WARNING_THRESHOLD = 3;
+export const ITERATION_WARNING_THRESHOLD = 5;
+export const FINALIZATION_WARNING_THRESHOLD = 3;
+export const MAX_ITERATIONS_FALLBACK_MESSAGE =
+  "I hit my step limit before finishing. Reply with `continue` to resume, or narrow the task.";
 
 /** Format current time as a short prefix for the user message. */
 export function formatTimestamp(now: Date = new Date()): string {
@@ -38,6 +41,16 @@ export function formatTimestamp(now: Date = new Date()): string {
 export function formatIterationWarning(iteration: number, max: number): string {
   const remaining = max - iteration;
   return `[System: ${remaining} iteration${remaining === 1 ? "" : "s"} remaining, begin wrapping up.]`;
+}
+
+/** Build a strong wrap-up instruction near the iteration limit. */
+export function formatFinalizationPrompt(iteration: number, max: number): string {
+  const remaining = max - iteration;
+  return (
+    `[System: ${remaining} iteration${remaining === 1 ? "" : "s"} remaining. ` +
+    "Do not start new tool chains. Prioritize finishing with a final answer. " +
+    "Summarize what is complete, what is pending, and any follow-up needed.]"
+  );
 }
 
 export interface AgentContext {
@@ -116,6 +129,7 @@ export async function runAgent(
   // Compaction state
   let totalTokens = 0;
   let hasFlushed = false;
+  let hasInjectedFinalizationPrompt = false;
 
   // Preemptive compaction: if history already exceeds context window, compact before calling LLM
   const estimatedTokens = estimateHistoryTokens(history);
@@ -148,15 +162,31 @@ export async function runAgent(
 
   // Agent loop
   for (let i = 0; i < MAX_ITERATIONS; i++) {
-    log.info("agent", "LLM iteration", { iteration: i + 1 });
-    await onProgress?.({ type: "thinking", iteration: i + 1 });
+    const iteration = i + 1;
+    const remaining = MAX_ITERATIONS - iteration;
+    const isFinalIteration = remaining === 0;
+
+    if (remaining <= FINALIZATION_WARNING_THRESHOLD && !hasInjectedFinalizationPrompt) {
+      const finalizationMsg: LLMMessage = {
+        role: "user",
+        content: formatFinalizationPrompt(iteration, MAX_ITERATIONS),
+      };
+      history.push(finalizationMsg);
+      newMessages.push(finalizationMsg);
+      hasInjectedFinalizationPrompt = true;
+    }
+
+    log.info("agent", "LLM iteration", { iteration });
+    await onProgress?.({ type: "thinking", iteration });
     const llmFn = ctx.callLLM ?? callLLM;
     const response = await llmFn({
       messages: history,
-      tools: llmTools,
+      tools: isFinalIteration ? [] : llmTools,
       systemPrompt,
       authStorage: ctx.authStorage,
     });
+
+    const toolCalls = isFinalIteration ? [] : response.toolCalls;
 
     // Update token count from API response (include cached tokens for accurate context size)
     totalTokens =
@@ -177,7 +207,7 @@ export async function runAgent(
     if (response.text) {
       assistantContent.push({ type: "text", text: response.text });
     }
-    for (const tc of response.toolCalls) {
+    for (const tc of toolCalls) {
       assistantContent.push({
         type: "tool_use",
         id: tc.id,
@@ -197,11 +227,13 @@ export async function runAgent(
     newMessages.push(assistantMsg);
 
     // If no tool calls, we're done
-    if (response.stopReason === "end_turn" || response.toolCalls.length === 0) {
-      log.info("agent", "Complete", { iterations: i + 1, stopReason: response.stopReason });
+    if (response.stopReason === "end_turn" || toolCalls.length === 0) {
+      log.info("agent", "Complete", { iterations: iteration, stopReason: response.stopReason });
+      const finalResponseText =
+        isFinalIteration && !response.text.trim() ? MAX_ITERATIONS_FALLBACK_MESSAGE : response.text;
 
       // Check for memory flush before saving
-      if (shouldFlush(totalTokens) && !hasFlushed) {
+      if (shouldFlush(totalTokens) && !hasFlushed && !isFinalIteration) {
         log.info("agent", "Injecting memory flush prompt before session end");
         const flushMsg: LLMMessage = { role: "user", content: buildFlushPrompt() };
         history.push(flushMsg);
@@ -233,24 +265,24 @@ export async function runAgent(
           log.warn("agent", "Memory index sync failed after compaction", formatError(err));
         }
 
-        return response.text;
+        return finalResponseText;
       }
 
       ctx.sessionStore.append(ctx.sessionKey, sanitizeForPersist(newMessages));
-      return response.text;
+      return finalResponseText;
     }
 
     // Execute tool calls
     const toolResults: LLMContentBlock[] = [];
-    for (let j = 0; j < response.toolCalls.length; j++) {
-      const tc = response.toolCalls[j];
+    for (let j = 0; j < toolCalls.length; j++) {
+      const tc = toolCalls[j];
       log.debug("agent", "Tool call", { name: tc.name, input: tc.input });
       await onProgress?.({
         type: "tool_running",
         iteration: i + 1,
         toolName: tc.name,
         toolIndex: j + 1,
-        toolCount: response.toolCalls.length,
+        toolCount: toolCalls.length,
       });
       const tool = toolMap.get(tc.name);
       let result: string;
@@ -277,7 +309,6 @@ export async function runAgent(
     }
 
     // Warn when nearing the iteration limit (text block alongside tool results)
-    const remaining = MAX_ITERATIONS - (i + 1);
     if (remaining > 0 && remaining <= ITERATION_WARNING_THRESHOLD) {
       toolResults.push({ type: "text", text: formatIterationWarning(i + 1, MAX_ITERATIONS) });
     }
@@ -333,5 +364,5 @@ export async function runAgent(
   // Max iterations reached
   ctx.sessionStore.append(ctx.sessionKey, sanitizeForPersist(newMessages));
   log.warn("agent", "Max iterations reached", { max: MAX_ITERATIONS });
-  return "(Agent reached maximum iterations)";
+  return MAX_ITERATIONS_FALLBACK_MESSAGE;
 }
