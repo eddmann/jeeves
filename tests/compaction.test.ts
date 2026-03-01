@@ -8,8 +8,7 @@ import {
   summarizeMessages,
   compactSession,
   CONTEXT_WINDOW,
-  RESERVE_FLOOR,
-  SOFT_THRESHOLD,
+  FLUSH_COMPACT_MARGIN,
 } from "../src/memory/compaction";
 import type { LLMMessage, LLMContentBlock } from "../src/llm";
 import {
@@ -85,13 +84,13 @@ describe("shouldFlushAndCompact", () => {
   });
 
   test("returns true when approaching limit", () => {
-    const threshold = CONTEXT_WINDOW - RESERVE_FLOOR - SOFT_THRESHOLD;
+    const threshold = CONTEXT_WINDOW - FLUSH_COMPACT_MARGIN;
     expect(shouldFlushAndCompact(threshold)).toBe(true);
     expect(shouldFlushAndCompact(threshold + 1)).toBe(true);
   });
 
   test("returns false just below threshold", () => {
-    const threshold = CONTEXT_WINDOW - RESERVE_FLOOR - SOFT_THRESHOLD;
+    const threshold = CONTEXT_WINDOW - FLUSH_COMPACT_MARGIN;
     expect(shouldFlushAndCompact(threshold - 1)).toBe(false);
   });
 });

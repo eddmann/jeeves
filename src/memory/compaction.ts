@@ -7,8 +7,7 @@ import type { AuthStorage } from "../auth/storage";
 import { log, formatError } from "../logger";
 
 export const CONTEXT_WINDOW = 200_000;
-export const RESERVE_FLOOR = 8_192;
-export const SOFT_THRESHOLD = 4_000;
+export const FLUSH_COMPACT_MARGIN = 12_192;
 const SAFETY_MARGIN = 1.2;
 const TARGET_BUDGET_RATIO = 0.5;
 
@@ -37,7 +36,7 @@ export function estimateHistoryTokens(messages: LLMMessage[]): number {
 
 /** Returns true when context should run flush+compact. */
 export function shouldFlushAndCompact(totalTokens: number): boolean {
-  return totalTokens >= CONTEXT_WINDOW - RESERVE_FLOOR - SOFT_THRESHOLD;
+  return totalTokens >= CONTEXT_WINDOW - FLUSH_COMPACT_MARGIN;
 }
 
 /** Build the flush prompt asking Claude to save important context to memory. */

@@ -23,7 +23,7 @@ import {
   type LLMMessage,
 } from "../src/llm";
 import type { ProgressUpdate } from "../src/progress";
-import { CONTEXT_WINDOW, RESERVE_FLOOR, SOFT_THRESHOLD } from "../src/memory/compaction";
+import { CONTEXT_WINDOW, FLUSH_COMPACT_MARGIN } from "../src/memory/compaction";
 import { createTempDir, cleanupTempDir } from "./helpers/temp-dir";
 import {
   buildLLMResponse,
@@ -423,7 +423,7 @@ describe("agent loop", () => {
   });
 
   test("includes cached tokens in compaction threshold check", async () => {
-    const overThreshold = CONTEXT_WINDOW - RESERVE_FLOOR + 1;
+    const overThreshold = CONTEXT_WINDOW - FLUSH_COMPACT_MARGIN + 1;
     const tool = buildStubTool("bash", "ok");
     const sessionStore = new SessionStore(tmpDir);
     let callCount = 0;
@@ -541,8 +541,8 @@ describe("agent loop", () => {
   });
 
   test("compacts session after memory flush to prevent repeated flush on next run", async () => {
-    // Token count in the flush zone (above soft threshold, below hard threshold)
-    const flushZoneTokens = CONTEXT_WINDOW - RESERVE_FLOOR - SOFT_THRESHOLD + 100;
+    // Token count in the flush-and-compact zone (above threshold trigger)
+    const flushZoneTokens = CONTEXT_WINDOW - FLUSH_COMPACT_MARGIN + 100;
     const tool = buildStubTool("write_file", "ok");
     const sessionStore = new SessionStore(tmpDir);
     let callCount = 0;
@@ -708,7 +708,7 @@ describe("agent loop", () => {
     const tool = buildStubTool("bash", "ok");
     let callCount = 0;
     let sawFlushPrompt = false;
-    const flushZoneTokens = CONTEXT_WINDOW - RESERVE_FLOOR - SOFT_THRESHOLD + 100;
+    const flushZoneTokens = CONTEXT_WINDOW - FLUSH_COMPACT_MARGIN + 100;
     const sessionStore = new SessionStore(tmpDir);
 
     const ctx: AgentContext = {

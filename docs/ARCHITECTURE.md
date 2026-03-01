@@ -63,19 +63,21 @@ The `main()` function is the composition root. It:
 4. On startup, syncs memory index and indexes existing session files
 5. Starts everything and registers graceful shutdown handlers
 
-The `makeAgentContext()` helper builds an `AgentContext` for each agent run, reloading skills fresh each time (so new skills are picked up without restart).
+The `makeAgentContext()` helper builds an `AgentContext` for each agent run, reloading skills and workspace files fresh each time (so updates are picked up without restart).
 
 ## Agent Loop (`src/agent.ts`)
 
 The core of the system. Given a user message:
 
 1. **Load history** from `SessionStore` (JSONL on disk, keyed by chat ID)
-2. **Build system prompt** from workspace convention files + skills
-3. **Call Claude** with the conversation history and tool definitions
-4. **If Claude returns tool calls**, execute them and feed the results back — loop
-5. **If Claude returns `end_turn`** or makes no tool calls, save history and return the text
+2. **Build system prompt** from current workspace files + skills
+3. **Tag user input with current UTC timestamp** and append to history
+4. **Call Claude** with timeout retries (up to 3 attempts total, linear backoff)
+5. **If Claude returns tool calls**, execute them and feed the results back — loop
+6. **When token usage crosses threshold**, run out-of-band `runFlushAndCompact()`
+7. **If Claude returns `end_turn`** or makes no tool calls, persist and return text
 
-The loop caps at **25 iterations** to prevent runaway agents. On hitting the cap, it returns a sentinel string.
+The loop caps at **25 main iterations**. On hitting the cap, it returns a fallback sentinel message.
 
 ### AgentContext
 
@@ -177,40 +179,48 @@ Token-aware context management that prevents context window overflow while prese
 
 **Token estimation**: `ceil((chars / 4) * 1.2)` — a character-count heuristic with a 20% safety margin. Handles string messages, text blocks, `tool_use` (includes serialized input), and `tool_result` blocks.
 
-**Two-phase context protection** relative to `CONTEXT_WINDOW` (200K tokens):
+**Flush-and-compact trigger** relative to `CONTEXT_WINDOW` (200K tokens):
 
-1. **Flush** (soft, at ~187K tokens): Injects a prompt telling the LLM to save important context to `memory/YYYY-MM-DD.md` using the `write_file` tool. The `hasFlushed` flag prevents repeated flush injections. The agent continues running.
+1. **Trigger** (~188K tokens): `shouldFlushAndCompact(totalTokens)` checks `CONTEXT_WINDOW - FLUSH_COMPACT_MARGIN`.
+2. **Out-of-band flush run**: `runFlushAndCompact()` appends a pre-compaction flush prompt and runs a dedicated internal loop (up to `MAX_FLUSH_TURNS`, currently 8) where the model can call tools to persist durable memory.
+3. **Immediate compaction**: after the flush sub-loop ends, `compactAndSync()` runs summarization/pruning and writes a compaction marker.
+4. **Flush turn timeouts**: each flush LLM call uses the same retry policy; if retries are exhausted for a flush turn, the helper exits flush turns and compacts immediately.
 
-2. **Compact** (hard, at ~192K tokens): Messages are split, summarized, and pruned:
-   - Walk backward from the end, keeping recent messages up to 50% of context window
-   - At least 1 message or half the history is always dropped
-   - Orphaned `tool_result` blocks (whose matching `tool_use` was dropped) are repaired
-   - Dropped messages are chunked and sent to `claude-sonnet-4-5-20250929` for summarization
-   - If multiple chunks, a merge pass combines partial summaries
-   - Fallback: if LLM fails, a stats-based summary is produced
-   - A synthetic `[Previous conversation summary]` user message is prepended to the kept messages
+Compaction internals:
+- Walk backward from the end, keeping recent messages up to 50% of context window
+- At least 1 message or half the history is always dropped
+- Orphaned `tool_result` blocks (whose matching `tool_use` was dropped) are repaired
+- Dropped messages are chunked and sent to `claude-sonnet-4-5-20250929` for summarization
+- If multiple chunks, a merge pass combines partial summaries
+- Fallback: if LLM fails, a stats-based summary is produced
+- A synthetic `[Previous conversation summary]` user message is prepended to the kept messages
 
 **Agent loop integration** (`src/agent.ts`):
 
-```
-for each iteration:
-  call LLM → get response + usage tokens
+```text
+for each iteration (max 25):
+  inject finalization prompt once when <= 3 iterations remain
+  response = callLLMWithRetries(tools = isFinalIteration ? [] : llmTools)
+  if timeout after retries:
+    append pending messages
+    return timeout fallback
 
-  if end_turn:
-    if shouldFlush && !hasFlushed → inject flush prompt, continue
-    else → append to session, return
+  update totalTokens from usage
+  shouldFlushAndCompactNow = shouldFlushAndCompact(totalTokens)
+  append assistant message
 
-  execute tools
+  if end_turn or no tool calls:
+    if shouldFlushAndCompactNow:
+      runFlushAndCompact()   # out-of-band helper, up to MAX_FLUSH_TURNS, then compactAndSync()
+    append pending messages (if any) and return final text
 
-  if shouldFlush && !hasFlushed → inject flush prompt, continue
+  execute tool calls
+  append tool_result message (+ iteration warning when <= 5 remain)
 
-  if shouldCompact:
-    append new messages to session file (preserve originals)
-    compactSession() → summarize + trim
-    replace in-memory history
-    write compaction marker + compacted messages
-    sync memory index (pick up freshly written memory files)
-    reset token counter and flush flag
+  if shouldFlushAndCompactNow:
+    runFlushAndCompact()
+    reset token counter
+    continue
 ```
 
 ### MemoryIndex (`src/memory/index.ts`)
@@ -225,7 +235,10 @@ SQLite-backed semantic search engine using `bun:sqlite` with hybrid vector + key
 
 **What gets indexed**:
 
-1. **Memory files**: `MEMORY.md` + all `.md` files in `workspace/memory/` — change detection via SHA-256 hash comparison
+1. **Memory files**:
+   - `MEMORY.md` = semantic memory (durable facts/preferences)
+   - `workspace/memory/YYYY-MM-DD.md` = episodic daily memory entries
+   - All are indexed with SHA-256 change detection
 2. **Session files**: JSONL files in `workspace/sessions/`, grouped by session key. Files are numbered sequentially (`chat.jsonl` = seq 0, `chat.1.jsonl` = seq 1, etc.); the highest sequence number is the **active** session, all others are **archived**:
    - **Archived files**: indexed entirely (all content is historical)
    - **Active file with compaction marker**: only content **before** the last `@@compaction` marker is indexed — everything after is already in the LLM's context window
@@ -262,13 +275,12 @@ User message arrives
     ↓
 SessionStore.get() → load working history (post-compaction)
     ↓
-Agent loop runs (up to 25 iterations)
+Agent loop runs (up to 25 main iterations)
     ↓
 [Context approaching limit?]
-    ├─ shouldFlush → inject "save to memory files" prompt → LLM writes files
-    └─ shouldCompact → summarize old messages, write compaction marker
-            ↓
-        MemoryIndex.sync() → re-index memory files + session transcripts
+    └─ shouldFlushAndCompact → runFlushAndCompact()
+           ├─ flush sub-loop (up to MAX_FLUSH_TURNS)
+           └─ compactAndSync() → write compaction marker + sync index
     ↓
 SessionStore.append() → persist new messages
     ↓
@@ -277,7 +289,7 @@ SessionStore.append() → persist new messages
     └─ memory_search tool → hybrid search over all memory + session files
 ```
 
-Compaction prompts the LLM to write memory files, which get indexed, which become searchable via `memory_search` in future conversations. Session files themselves are also indexed, so past conversations are retrievable even without explicit memory writes.
+Compaction prompts the LLM to write memory files, which get indexed, which become searchable via `memory_search` in future conversations. Session files themselves are also indexed as episodic memory, so past conversations are retrievable even without explicit memory writes.
 
 ## Heartbeat (`src/heartbeat.ts`)
 
@@ -313,19 +325,19 @@ workspace/
 ├── IDENTITY.md       # who the agent is
 ├── USER.md           # info about the user
 ├── TOOLS.md          # tool usage guidance
-├── MEMORY.md         # persistent memory
+├── MEMORY.md         # semantic memory (durable facts/preferences)
 ├── HEARTBEAT.md      # heartbeat instructions
 ├── AGENTS.md         # agent behavior instructions
 ├── skills/           # user-defined skills (override bundled)
 ├── sessions/         # JSONL conversation history
 ├── logs/             # JSONL structured logs (daily rotation)
 ├── cron/             # job persistence (jobs.json)
-└── memory/           # daily memory files + index.sqlite (MemoryIndex DB)
+└── memory/           # episodic memory files (YYYY-MM-DD.md) + index.sqlite
 ```
 
 ### Convention Files
 
-Seven `SCREAMING_CASE.md` files loaded from workspace at startup and injected into every system prompt. Max 20,000 chars per file, truncated with a 70% head / 20% tail strategy preserving the most important content.
+Seven core `SCREAMING_CASE.md` files plus up to two most recent `memory/YYYY-MM-DD.md` episodic memory files are loaded when each agent context is created and injected into every system prompt. Max 20,000 chars per file, truncated with a 70% head / 20% tail strategy preserving the most important content.
 
 ### Initialization
 
@@ -384,7 +396,7 @@ Formats agent iteration progress for display in Telegram:
 ```
 1.  User sends "check the weather" in Telegram
 2.  grammY handler receives it, acquires agent mutex
-3.  makeAgentContext() builds context with fresh skills + memoryIndex
+3.  makeAgentContext() builds context with fresh skills + workspace files + memoryIndex
 4.  runAgent() loads session history from disk (post-last-compaction-marker)
 5.  System prompt assembled: base identity + skills + workspace files
 6.  Claude called with history + system prompt + tool definitions
@@ -392,8 +404,8 @@ Formats agent iteration progress for display in Telegram:
 8.  bash tool executes the command, returns stdout
 9.  Tool result appended to history, Claude called again
 10. Claude responds: end_turn["It's sunny and 72F"]
-11. [If context near limit: flush prompt injected → LLM writes memory files]
-12. [If context over limit: compaction → summarize + prune + re-index memory]
+11. [If context near limit: runFlushAndCompact() runs out-of-band flush turns]
+12. [Flush helper then compacts immediately: summarize + prune + re-index memory]
 13. Session history saved to disk
 14. Response formatted as Telegram HTML and sent
 15. Agent mutex released
@@ -403,7 +415,7 @@ Formats agent iteration progress for display in Telegram:
 
 **Agent mutex over concurrency.** A single promise-based lock serializes all agent runs. This eliminates race conditions on sessions and workspace files at the cost of throughput. Acceptable for a personal assistant with one user.
 
-**JSONL for sessions and logs.** Append-friendly, human-readable, trivially parseable. Sessions are read in full on each agent run and rewritten on save.
+**JSONL for sessions and logs.** Append-friendly, human-readable, trivially parseable. Sessions are append-only during normal turns; compaction writes a marker plus compacted working history while preserving earlier lines.
 
 **Stealth mode for OAuth.** OAuth tokens from Claude Pro/Max require requests that look like they come from Claude Code. The stealth layer handles this transparently — the rest of the codebase doesn't know about it.
 
@@ -411,10 +423,10 @@ Formats agent iteration progress for display in Telegram:
 
 **Skills are lazy-loaded.** The system prompt lists skill names and descriptions. The agent reads the full `SKILL.md` only when it decides to use a skill. This keeps the system prompt concise.
 
-**Convention files as system prompt injection.** Workspace files are the primary mechanism for customizing the agent's behavior, personality, and knowledge. They're loaded once at startup and included in every LLM call.
+**Convention files as system prompt injection.** Workspace files are the primary mechanism for customizing the agent's behavior, personality, and knowledge. Each run reloads core convention files plus the two latest episodic memory files, and includes them in every LLM call.
 
-**Two-phase context protection.** Rather than hard-truncating sessions at a message count, the system uses token estimation to detect when context is filling up. A soft flush prompt gives the LLM a chance to explicitly save important context before the hard compaction step summarizes and prunes. This preserves more information than a simple sliding window.
+**Flush-and-compact as one operation.** A token threshold triggers an out-of-band flush helper that can perform multi-turn memory persistence, then compacts immediately. This preserves context while keeping the main iteration budget stable.
 
 **Hybrid search for memory retrieval.** Combining vector similarity (semantic) with FTS5 keyword search means queries work even without embeddings (keyword-only fallback) and catch both semantically similar and exact-match content. The brute-force vector scan is acceptable given the expected corpus size for a personal assistant.
 
-**Memory as a circular flow.** Compaction prompts the LLM to write memory files, which get indexed and become searchable in future conversations. Session transcripts are also indexed directly. This creates a self-reinforcing knowledge base without requiring explicit user action.
+**Memory as a circular flow.** Compaction prompts the LLM to write memory files, which get indexed and become searchable in future conversations. Session transcripts are also indexed as episodic memory. This creates a self-reinforcing knowledge base without requiring explicit user action.

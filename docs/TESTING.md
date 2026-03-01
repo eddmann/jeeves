@@ -50,7 +50,7 @@ Tests are organized by **feature/behavior**, not by file structure:
 
 | Test file                    | What it covers                                                                                                                               |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent.test.ts`              | Agent loop: LLM calls, tool execution, iteration limits, session persistence, progress reporting, system prompt building                     |
+| `agent.test.ts`              | Agent loop: LLM calls, timeout retries/fallback, tool execution, iteration limits, flush+compact integration, session persistence, progress reporting, system prompt building |
 | `session.test.ts`            | Conversation persistence: save/load, truncation, orphaned tool_result cleanup, filesystem safety                                             |
 | `heartbeat.test.ts`          | Periodic check-ins: active hours, content detection, HEARTBEAT_OK suppression, deduplication                                                 |
 | `scheduling.test.ts`         | Cron scheduler + cron tool: job CRUD, schedule types (at/every/cron), execution, persistence, tool interface                                 |
@@ -69,7 +69,7 @@ Tests are organized by **feature/behavior**, not by file structure:
 | `memory-hybrid.test.ts`      | Hybrid search: vector + keyword merge, weighting, score normalization                                                                        |
 | `memory-search-tool.test.ts` | Memory search tool: query interface, result formatting                                                                                       |
 | `embeddings.test.ts`         | Embeddings: OpenAI API calls, batching, no-op embedder                                                                                       |
-| `compaction.test.ts`         | Compaction: token estimation, summarization, orphan repair, flush/compact thresholds                                                         |
+| `compaction.test.ts`         | Compaction: token estimation, summarization, orphan repair, flush-and-compact threshold + flush prompt contract                              |
 | `agent-lock.test.ts`         | Agent mutex: serialization, timeout, lock release                                                                                            |
 | `transcribe.test.ts`         | Transcription: Whisper API wrapper, file format handling                                                                                     |
 

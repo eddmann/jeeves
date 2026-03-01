@@ -47,15 +47,15 @@ Message your bot on Telegram. It responds. See [docs/DOCKER.md](docs/DOCKER.md) 
 You (Telegram) → grammY → Agent Loop → Claude + Tools → Reply
 ```
 
-The agent loop calls Claude with conversation history and tools (`bash`, `read`, `write`, `edit`, `web_fetch`, `web_search`, `cron`, `memory_search`). Claude calls tools, results feed back — up to 25 iterations per message. A heartbeat system checks in periodically, and a cron scheduler handles timed jobs.
+The agent loop calls Claude with conversation history and tools (`bash`, `read`, `write`, `edit`, `web_fetch`, `web_search`, `cron`, `memory_search`). Claude calls tools, results feed back — up to 25 main iterations per message, with timeout retries and graceful fallback if retries are exhausted. A heartbeat system checks in periodically, and a cron scheduler handles timed jobs.
 
-Long-term memory is backed by a SQLite index with hybrid search (FTS5 keyword + optional OpenAI vector embeddings). When context approaches the limit, the agent saves important facts to memory files and compacts old messages via LLM summarization. Past conversations and memory files are searchable across sessions via the `memory_search` tool.
+Long-term memory is backed by a SQLite index with hybrid search (FTS5 keyword + optional OpenAI vector embeddings). `MEMORY.md` acts as semantic memory (durable facts/preferences), while `memory/YYYY-MM-DD.md` files capture episodic daily memory. Past conversation transcripts are also treated as episodic memory and indexed for recall. When context approaches the limit, the agent runs an out-of-band flush+compact helper: it asks the model to persist durable memory, then immediately compacts old messages via LLM summarization. Past conversations and memory files are searchable across sessions via the `memory_search` tool.
 
 For the full system design, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Workspace
 
-On first run, Jeeves creates a `workspace/` directory. Convention files (`SOUL.md`, `MEMORY.md`, `HEARTBEAT.md`, etc.) are injected into every system prompt — edit them to shape how Jeeves behaves. The agent reads these each session and can update them itself.
+On first run, Jeeves creates a `workspace/` directory. Convention files (`SOUL.md`, `MEMORY.md`, `HEARTBEAT.md`, etc.) are injected into every system prompt, plus the two most recent `memory/YYYY-MM-DD.md` episodic files. Edit them to shape how Jeeves behaves; the agent reloads them each run and can update them itself.
 
 Skills are `SKILL.md` files with YAML frontmatter. Ask the agent to create new ones, or drop them in `workspace/skills/`.
 
