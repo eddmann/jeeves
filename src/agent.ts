@@ -514,7 +514,6 @@ export async function runAgent(
       totalTokens = 0;
       continue;
     }
-
   }
 
   // Max iterations reached

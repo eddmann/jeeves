@@ -725,10 +725,10 @@ describe("agent loop", () => {
         const lastText =
           typeof last?.content === "string"
             ? last.content
-            : last?.content
-                ?.filter((b) => b.type === "text")
+            : (last?.content
+                ?.filter((b): b is LLMContentBlock & { type: "text" } => b.type === "text")
                 .map((b) => b.text)
-                .join(" ") ?? "";
+                .join(" ") ?? "");
         if (lastText.includes("Pre-compaction memory flush.")) {
           sawFlushPrompt = true;
         }
