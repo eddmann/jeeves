@@ -250,4 +250,22 @@ describe("compactSession", () => {
       }
     }
   });
+
+  test("ensures compacted history ends with user after orphan repair", async () => {
+    const messages: LLMMessage[] = [
+      buildUserMessage("early"),
+      buildToolUseMessage([{ id: "t1", name: "bash", input: {} }]),
+      buildToolResultMessage([{ tool_use_id: "t1", content: "result" }]),
+      buildAssistantMessage("latest assistant response"),
+    ];
+
+    const result = await compactSession({
+      messages,
+      totalTokens: CONTEXT_WINDOW,
+      callLLM: async () => buildLLMResponse({ text: "Summary" }),
+      authStorage: buildStubAuth(),
+    });
+
+    expect(result.messages[result.messages.length - 1]?.role).toBe("user");
+  });
 });

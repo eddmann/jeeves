@@ -250,8 +250,13 @@ export async function compactSession(opts: {
   const droppedMessages = opts.messages.slice(0, splitIndex);
   let keptMessages = opts.messages.slice(splitIndex);
 
-  // Repair orphaned tool_results in kept messages
+  // Repair orphaned tool_results in kept messages, then ensure the compacted
+  // history can be sent to models that require the conversation to end on user.
   keptMessages = repairOrphanedToolResults(keptMessages);
+  while (keptMessages.length > 0 && keptMessages[keptMessages.length - 1].role === "assistant") {
+    droppedMessages.push(keptMessages.pop()!);
+    keptMessages = repairOrphanedToolResults(keptMessages);
+  }
 
   // Summarize dropped messages
   const summary = await summarizeMessages({
