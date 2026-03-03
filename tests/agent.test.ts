@@ -7,6 +7,8 @@ import {
   MAX_ITERATIONS_FALLBACK_MESSAGE,
   LLM_TIMEOUT_RETRIES,
   LLM_TIMEOUT_FALLBACK_MESSAGE,
+  LLM_OVERLOADED_RETRIES,
+  LLM_OVERLOADED_FALLBACK_MESSAGE,
   sanitizeForPersist,
   formatTimestamp,
   formatIterationWarning,
@@ -18,6 +20,7 @@ import { buildSystemPrompt } from "../src/workspace/prompt";
 import { formatSkillsForPrompt } from "../src/skills/prompt";
 import {
   LLMTimeoutError,
+  LLMOverloadedError,
   type LLMResponse,
   type LLMContentBlock,
   type LLMMessage,
@@ -224,6 +227,56 @@ describe("agent loop", () => {
     expect(result).toBe(LLM_TIMEOUT_FALLBACK_MESSAGE);
     expect(callCount).toBe(LLM_TIMEOUT_RETRIES + 1);
     const saved = sessionStore.get("timeout-retry-exhausted");
+    expect(saved.length).toBeGreaterThan(0);
+  });
+
+  test("retries once when the LLM is overloaded and then succeeds", async () => {
+    let callCount = 0;
+    const ctx: AgentContext = {
+      authStorage: buildStubAuth(),
+      tools: [],
+      skills: [],
+      workspaceFiles: [],
+      sessionStore: new SessionStore(tmpDir),
+      sessionKey: "overloaded-retry-success",
+      memoryIndex,
+      callLLM: async () => {
+        callCount++;
+        if (callCount === 1) {
+          throw new LLMOverloadedError();
+        }
+        return buildLLMResponse({ text: "recovered from overload" });
+      },
+    };
+
+    const result = await runAgent(ctx, "hello");
+
+    expect(result).toBe("recovered from overload");
+    expect(callCount).toBe(2);
+  });
+
+  test("returns overloaded fallback after exhausting retries", async () => {
+    let callCount = 0;
+    const sessionStore = new SessionStore(tmpDir);
+    const ctx: AgentContext = {
+      authStorage: buildStubAuth(),
+      tools: [],
+      skills: [],
+      workspaceFiles: [],
+      sessionStore,
+      sessionKey: "overloaded-retry-exhausted",
+      memoryIndex,
+      callLLM: async () => {
+        callCount++;
+        throw new LLMOverloadedError();
+      },
+    };
+
+    const result = await runAgent(ctx, "hello");
+
+    expect(result).toBe(LLM_OVERLOADED_FALLBACK_MESSAGE);
+    expect(callCount).toBe(LLM_OVERLOADED_RETRIES + 1);
+    const saved = sessionStore.get("overloaded-retry-exhausted");
     expect(saved.length).toBeGreaterThan(0);
   });
 

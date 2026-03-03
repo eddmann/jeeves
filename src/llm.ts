@@ -3,7 +3,7 @@
  * Supports API key and OAuth (stealth) modes.
  */
 
-import Anthropic, { type ClientOptions } from "@anthropic-ai/sdk";
+import Anthropic, { APIError, type ClientOptions } from "@anthropic-ai/sdk";
 import type { AuthStorage } from "./auth/storage";
 import {
   getStealthHeaders,
@@ -53,6 +53,13 @@ export class LLMTimeoutError extends Error {
   constructor(message = "LLM request timed out") {
     super(message);
     this.name = "LLMTimeoutError";
+  }
+}
+
+export class LLMOverloadedError extends Error {
+  constructor(message = "Anthropic API is overloaded") {
+    super(message);
+    this.name = "LLMOverloadedError";
   }
 }
 
@@ -184,6 +191,9 @@ export async function callLLM(opts: {
   } catch (err) {
     stream.abort();
     log.error("llm", "API error", { ms: Date.now() - llmStart, ...formatError(err) });
+    if (err instanceof APIError && err.status !== undefined && err.status >= 500) {
+      throw new LLMOverloadedError(err.message);
+    }
     throw err;
   }
 

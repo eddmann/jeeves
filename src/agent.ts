@@ -6,6 +6,7 @@ import type { AuthStorage } from "./auth/storage";
 import {
   callLLM,
   LLMTimeoutError,
+  LLMOverloadedError,
   type LLMContentBlock,
   type LLMMessage,
   type LLMResponse,
@@ -36,6 +37,10 @@ export const LLM_TIMEOUT_RETRIES = 2;
 export const LLM_TIMEOUT_BASE_BACKOFF_MS = 500;
 export const LLM_TIMEOUT_FALLBACK_MESSAGE =
   "The model timed out while thinking. I saved progress. Reply with `continue` to resume.";
+export const LLM_OVERLOADED_RETRIES = 2;
+export const LLM_OVERLOADED_BASE_BACKOFF_MS = 1_000;
+export const LLM_OVERLOADED_FALLBACK_MESSAGE =
+  "The model is currently overloaded. I saved progress. Please try again in a minute or reply with `continue` to resume.";
 export const MAX_FLUSH_TURNS = 8;
 
 /** Format current time as a short prefix for the user message. */
@@ -66,6 +71,16 @@ export function formatFinalizationPrompt(iteration: number, max: number): string
 /** Identify timeout failures from the LLM client. */
 export function isLLMTimeoutError(err: unknown): boolean {
   return err instanceof LLMTimeoutError;
+}
+
+/** Identify overloaded failures from the LLM client. */
+export function isLLMOverloadedError(err: unknown): boolean {
+  return err instanceof LLMOverloadedError;
+}
+
+/** Identify transient LLM errors worth retrying at the agent level. */
+export function isRetryableLLMError(err: unknown): boolean {
+  return isLLMTimeoutError(err) || isLLMOverloadedError(err);
 }
 
 export interface AgentContext {
@@ -144,7 +159,7 @@ async function runFlushAndCompact(opts: {
   let flushTokens = opts.totalTokens;
   for (let flushTurn = 1; flushTurn <= MAX_FLUSH_TURNS; flushTurn++) {
     let response: LLMResponse | null = null;
-    for (let attempt = 0; attempt <= LLM_TIMEOUT_RETRIES; attempt++) {
+    for (let attempt = 0; attempt <= LLM_OVERLOADED_RETRIES; attempt++) {
       try {
         response = await opts.llmFn({
           messages: opts.history,
@@ -154,20 +169,29 @@ async function runFlushAndCompact(opts: {
         });
         break;
       } catch (err) {
-        if (!isLLMTimeoutError(err)) {
+        if (!isRetryableLLMError(err)) {
           throw err;
         }
+        const isOverloaded = isLLMOverloadedError(err);
+        const retries = isOverloaded ? LLM_OVERLOADED_RETRIES : LLM_TIMEOUT_RETRIES;
+        const baseBackoff = isOverloaded
+          ? LLM_OVERLOADED_BASE_BACKOFF_MS
+          : LLM_TIMEOUT_BASE_BACKOFF_MS;
         const attemptNumber = attempt + 1;
-        const maxAttempts = LLM_TIMEOUT_RETRIES + 1;
-        const hasRetryLeft = attempt < LLM_TIMEOUT_RETRIES;
-        log.warn("agent", "LLM timeout during flush turn", {
-          flushTurn,
-          attempt: attemptNumber,
-          maxAttempts,
-          retrying: hasRetryLeft,
-        });
+        const maxAttempts = retries + 1;
+        const hasRetryLeft = attempt < retries;
+        log.warn(
+          "agent",
+          isOverloaded ? "LLM overloaded during flush turn" : "LLM timeout during flush turn",
+          {
+            flushTurn,
+            attempt: attemptNumber,
+            maxAttempts,
+            retrying: hasRetryLeft,
+          },
+        );
         if (!hasRetryLeft) break;
-        const backoffMs = LLM_TIMEOUT_BASE_BACKOFF_MS * attemptNumber;
+        const backoffMs = baseBackoff * attemptNumber;
         await new Promise((resolve) => setTimeout(resolve, backoffMs));
       }
     }
@@ -351,7 +375,9 @@ export async function runAgent(
     await onProgress?.({ type: "thinking", iteration });
     const llmFn = ctx.callLLM ?? callLLM;
     let response: LLMResponse | null = null;
-    for (let attempt = 0; attempt <= LLM_TIMEOUT_RETRIES; attempt++) {
+    let lastError: unknown = null;
+    const maxRetries = Math.max(LLM_TIMEOUT_RETRIES, LLM_OVERLOADED_RETRIES);
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         response = await llmFn({
           messages: history,
@@ -361,11 +387,17 @@ export async function runAgent(
         });
         break;
       } catch (err) {
-        if (!isLLMTimeoutError(err)) throw err;
+        if (!isRetryableLLMError(err)) throw err;
+        lastError = err;
+        const isOverloaded = isLLMOverloadedError(err);
+        const retries = isOverloaded ? LLM_OVERLOADED_RETRIES : LLM_TIMEOUT_RETRIES;
+        const baseBackoff = isOverloaded
+          ? LLM_OVERLOADED_BASE_BACKOFF_MS
+          : LLM_TIMEOUT_BASE_BACKOFF_MS;
         const attemptNumber = attempt + 1;
-        const maxAttempts = LLM_TIMEOUT_RETRIES + 1;
-        const hasRetryLeft = attempt < LLM_TIMEOUT_RETRIES;
-        log.warn("agent", "LLM timeout", {
+        const maxAttempts = retries + 1;
+        const hasRetryLeft = attempt < retries;
+        log.warn("agent", isOverloaded ? "LLM overloaded" : "LLM timeout", {
           iteration,
           attempt: attemptNumber,
           maxAttempts,
@@ -374,16 +406,18 @@ export async function runAgent(
 
         if (!hasRetryLeft) {
           ctx.sessionStore.append(ctx.sessionKey, sanitizeForPersist(newMessages));
-          return LLM_TIMEOUT_FALLBACK_MESSAGE;
+          return isOverloaded ? LLM_OVERLOADED_FALLBACK_MESSAGE : LLM_TIMEOUT_FALLBACK_MESSAGE;
         }
 
-        const backoffMs = LLM_TIMEOUT_BASE_BACKOFF_MS * attemptNumber;
+        const backoffMs = baseBackoff * attemptNumber;
         await new Promise((resolve) => setTimeout(resolve, backoffMs));
       }
     }
     if (!response) {
       ctx.sessionStore.append(ctx.sessionKey, sanitizeForPersist(newMessages));
-      return LLM_TIMEOUT_FALLBACK_MESSAGE;
+      return isLLMOverloadedError(lastError)
+        ? LLM_OVERLOADED_FALLBACK_MESSAGE
+        : LLM_TIMEOUT_FALLBACK_MESSAGE;
     }
 
     const toolCalls = isFinalIteration ? [] : response.toolCalls;
