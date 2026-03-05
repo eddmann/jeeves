@@ -110,6 +110,11 @@ export function getReplyContext(replyMsg: unknown): string | null {
   return `[Replying to: ${preview}]`;
 }
 
+export interface CommandDef {
+  description: string;
+  handler: (chatId: string) => Promise<string>;
+}
+
 export function createTelegramChannel(opts: {
   token: string;
   onMessage: (
@@ -117,8 +122,7 @@ export function createTelegramChannel(opts: {
     content: string | LLMContentBlock[],
     onProgress: (u: ProgressUpdate) => Promise<void>,
   ) => Promise<string>;
-  onCompact?: (chatId: string) => Promise<string>;
-  onContext?: (chatId: string) => Promise<string>;
+  commands?: Record<string, CommandDef>;
   transcribe?: TranscribeFn;
 }): Channel {
   const bot = new Bot(opts.token);
@@ -260,41 +264,27 @@ export function createTelegramChannel(opts: {
   }
 
   // Slash commands (registered before message handlers so grammY matches them first)
-  if (opts.onCompact) {
-    const onCompact = opts.onCompact;
-    bot.command("compact", (ctx) => {
-      const chatId = ctx.chat!.id.toString();
-      log.info("telegram", "Command /compact", { chatId });
-      return withChatLock(chatId, async () => {
-        await ctx.replyWithChatAction("typing");
-        try {
-          const result = await onCompact(chatId);
-          await sendFormatted((t, o) => ctx.reply(t, o as Parameters<typeof ctx.reply>[1]), result);
-        } catch (err) {
-          log.error("telegram", "Error in /compact", { chatId, ...formatError(err) });
-          const errMsg = err instanceof Error ? err.message : String(err);
-          await ctx.reply(`Compaction failed: ${errMsg}`);
-        }
+  if (opts.commands) {
+    for (const [name, cmd] of Object.entries(opts.commands)) {
+      bot.command(name, (ctx) => {
+        const chatId = ctx.chat!.id.toString();
+        log.info("telegram", `Command /${name}`, { chatId });
+        return withChatLock(chatId, async () => {
+          await ctx.replyWithChatAction("typing");
+          try {
+            const result = await cmd.handler(chatId);
+            await sendFormatted(
+              (t, o) => ctx.reply(t, o as Parameters<typeof ctx.reply>[1]),
+              result,
+            );
+          } catch (err) {
+            log.error("telegram", `Error in /${name}`, { chatId, ...formatError(err) });
+            const errMsg = err instanceof Error ? err.message : String(err);
+            await ctx.reply(`Command failed: ${errMsg}`);
+          }
+        });
       });
-    });
-  }
-
-  if (opts.onContext) {
-    const onContext = opts.onContext;
-    bot.command("context", (ctx) => {
-      const chatId = ctx.chat!.id.toString();
-      log.info("telegram", "Command /context", { chatId });
-      return withChatLock(chatId, async () => {
-        try {
-          const result = await onContext(chatId);
-          await sendFormatted((t, o) => ctx.reply(t, o as Parameters<typeof ctx.reply>[1]), result);
-        } catch (err) {
-          log.error("telegram", "Error in /context", { chatId, ...formatError(err) });
-          const errMsg = err instanceof Error ? err.message : String(err);
-          await ctx.reply(`Context check failed: ${errMsg}`);
-        }
-      });
-    });
+    }
   }
 
   // Text messages
@@ -374,15 +364,11 @@ export function createTelegramChannel(opts: {
       await bot.init();
 
       // Register slash commands with Telegram so they appear in the command menu
-      const commands = [
-        ...(opts.onCompact
-          ? [{ command: "compact", description: "Force session compaction" }]
-          : []),
-        ...(opts.onContext
-          ? [{ command: "context", description: "Show context window usage" }]
-          : []),
-      ];
-      if (commands.length > 0) {
+      if (opts.commands) {
+        const commands = Object.entries(opts.commands).map(([name, cmd]) => ({
+          command: name,
+          description: cmd.description,
+        }));
         await bot.api.setMyCommands(commands);
       }
 
