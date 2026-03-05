@@ -19,6 +19,8 @@ import { MemoryIndex } from "./memory/index";
 import { createOpenAIEmbedder, createNoOpEmbedder } from "./memory/embeddings";
 import { createTranscriber } from "./transcribe";
 import { withAgentLock } from "./agent-lock";
+import { callLLM } from "./llm";
+import { estimateHistoryTokens, compactSession, CONTEXT_WINDOW } from "./memory/compaction";
 
 async function main() {
   const args = process.argv.slice(2);
@@ -181,6 +183,61 @@ async function main() {
           const ctx = makeAgentContext(`telegram_${msgChatId}`);
           return runAgent(ctx, content, onProgress);
         });
+      },
+      onCompact: async (chatId) => {
+        return withAgentLock(async () => {
+          const sessionKey = `telegram_${chatId}`;
+          const history = sessionStore.get(sessionKey);
+          if (history.length === 0) return "Nothing to compact — session is empty.";
+
+          const tokensBefore = estimateHistoryTokens(history);
+          const messagesBefore = history.length;
+
+          const result = await compactSession({
+            messages: history,
+            totalTokens: tokensBefore,
+            callLLM,
+            authStorage,
+          });
+
+          sessionStore.compact(sessionKey, result.messages);
+
+          try {
+            await memoryIndex.sync();
+          } catch {
+            // Non-fatal — index will catch up on next sync
+          }
+
+          const tokensAfter = estimateHistoryTokens(result.messages);
+          return [
+            "**Session compacted**",
+            `Messages: ${messagesBefore} → ${result.messages.length}`,
+            `Tokens (est): ~${tokensBefore.toLocaleString()} → ~${tokensAfter.toLocaleString()}`,
+          ].join("\n");
+        });
+      },
+      onContext: async (chatId) => {
+        const sessionKey = `telegram_${chatId}`;
+        const history = sessionStore.get(sessionKey);
+
+        if (history.length === 0) return "Session is empty — no messages yet.";
+
+        const tokens = estimateHistoryTokens(history);
+        const pct = ((tokens / CONTEXT_WINDOW) * 100).toFixed(1);
+
+        const userCount = history.filter((m) => m.role === "user").length;
+        const assistantCount = history.filter((m) => m.role === "assistant").length;
+
+        const toolUses = history
+          .flatMap((m) => (typeof m.content === "string" ? [] : m.content))
+          .filter((b) => b.type === "tool_use").length;
+
+        return [
+          "**Context window**",
+          `Messages: ${history.length} (${userCount} user, ${assistantCount} assistant)`,
+          `Tool calls: ${toolUses}`,
+          `Tokens (est): ~${tokens.toLocaleString()} / ${CONTEXT_WINDOW.toLocaleString()} (${pct}%)`,
+        ].join("\n");
       },
     });
   }

@@ -117,6 +117,8 @@ export function createTelegramChannel(opts: {
     content: string | LLMContentBlock[],
     onProgress: (u: ProgressUpdate) => Promise<void>,
   ) => Promise<string>;
+  onCompact?: (chatId: string) => Promise<string>;
+  onContext?: (chatId: string) => Promise<string>;
   transcribe?: TranscribeFn;
 }): Channel {
   const bot = new Bot(opts.token);
@@ -257,6 +259,44 @@ export function createTelegramChannel(opts: {
     });
   }
 
+  // Slash commands (registered before message handlers so grammY matches them first)
+  if (opts.onCompact) {
+    const onCompact = opts.onCompact;
+    bot.command("compact", (ctx) => {
+      const chatId = ctx.chat!.id.toString();
+      log.info("telegram", "Command /compact", { chatId });
+      return withChatLock(chatId, async () => {
+        await ctx.replyWithChatAction("typing");
+        try {
+          const result = await onCompact(chatId);
+          await sendFormatted((t, o) => ctx.reply(t, o as Parameters<typeof ctx.reply>[1]), result);
+        } catch (err) {
+          log.error("telegram", "Error in /compact", { chatId, ...formatError(err) });
+          const errMsg = err instanceof Error ? err.message : String(err);
+          await ctx.reply(`Compaction failed: ${errMsg}`);
+        }
+      });
+    });
+  }
+
+  if (opts.onContext) {
+    const onContext = opts.onContext;
+    bot.command("context", (ctx) => {
+      const chatId = ctx.chat!.id.toString();
+      log.info("telegram", "Command /context", { chatId });
+      return withChatLock(chatId, async () => {
+        try {
+          const result = await onContext(chatId);
+          await sendFormatted((t, o) => ctx.reply(t, o as Parameters<typeof ctx.reply>[1]), result);
+        } catch (err) {
+          log.error("telegram", "Error in /context", { chatId, ...formatError(err) });
+          const errMsg = err instanceof Error ? err.message : String(err);
+          await ctx.reply(`Context check failed: ${errMsg}`);
+        }
+      });
+    });
+  }
+
   // Text messages
   bot.on("message:text", (ctx) => {
     const reply = getReplyContext(ctx.message.reply_to_message);
@@ -332,6 +372,20 @@ export function createTelegramChannel(opts: {
     async start() {
       log.info("telegram", "Bot starting");
       await bot.init();
+
+      // Register slash commands with Telegram so they appear in the command menu
+      const commands = [
+        ...(opts.onCompact
+          ? [{ command: "compact", description: "Force session compaction" }]
+          : []),
+        ...(opts.onContext
+          ? [{ command: "context", description: "Show context window usage" }]
+          : []),
+      ];
+      if (commands.length > 0) {
+        await bot.api.setMyCommands(commands);
+      }
+
       log.info("telegram", "Bot running", { username: bot.botInfo.username });
       handle = run(bot);
     },
