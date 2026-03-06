@@ -251,6 +251,34 @@ describe("compactSession", () => {
     }
   });
 
+  test("avoids consecutive user messages when keptMessages starts with user", async () => {
+    const messages: LLMMessage[] = [
+      buildUserMessage("old context"),
+      buildAssistantMessage("old response"),
+      buildUserMessage("recent question"),
+      buildAssistantMessage("recent answer"),
+      buildUserMessage("latest"),
+    ];
+
+    const result = await compactSession({
+      messages,
+      totalTokens: CONTEXT_WINDOW,
+      callLLM: async () => buildLLMResponse({ text: "Summary" }),
+      authStorage: buildStubAuth(),
+    });
+
+    // Check no consecutive same-role messages
+    for (let i = 1; i < result.messages.length; i++) {
+      expect(result.messages[i].role).not.toBe(result.messages[i - 1].role);
+    }
+    // First message should contain the summary
+    const firstContent =
+      typeof result.messages[0].content === "string"
+        ? result.messages[0].content
+        : (result.messages[0].content[0] as { type: string; text: string }).text;
+    expect(firstContent).toContain("[Previous conversation summary]");
+  });
+
   test("ensures compacted history ends with user after orphan repair", async () => {
     const messages: LLMMessage[] = [
       buildUserMessage("early"),

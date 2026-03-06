@@ -265,18 +265,26 @@ export async function compactSession(opts: {
     authStorage: opts.authStorage,
   });
 
-  // Prepend summary as synthetic user message
-  const summaryMessage: LLMMessage = {
-    role: "user",
-    content: `[Previous conversation summary]\n\n${summary}`,
-  };
-
-  const compacted = [summaryMessage, ...keptMessages];
+  // Prepend summary — merge into first kept message if it's already user
+  // to avoid consecutive same-role messages.
+  const summaryText = `[Previous conversation summary]\n\n${summary}`;
+  let compacted: LLMMessage[];
+  if (keptMessages.length > 0 && keptMessages[0].role === "user") {
+    const first = keptMessages[0];
+    if (typeof first.content === "string") {
+      first.content = summaryText + "\n\n" + first.content;
+    } else {
+      first.content = [{ type: "text", text: summaryText }, ...first.content];
+    }
+    compacted = keptMessages;
+  } else {
+    compacted = [{ role: "user", content: summaryText }, ...keptMessages];
+  }
 
   log.info("compaction", "Session compacted", {
     droppedMessages: droppedMessages.length,
     keptMessages: keptMessages.length,
-    summaryTokens: estimateMessageTokens(summaryMessage),
+    summaryTokens: estimateMessageTokens(compacted[0]),
   });
 
   return { messages: compacted, summary };

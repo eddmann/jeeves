@@ -56,6 +56,58 @@ export class LLMTimeoutError extends Error {
   }
 }
 
+/** Convert message content to a content block array. */
+function toBlocks(content: string | LLMContentBlock[]): LLMContentBlock[] {
+  return typeof content === "string" ? [{ type: "text", text: content }] : content;
+}
+
+/**
+ * Ensure messages alternate user/assistant and end with user.
+ * Merges consecutive same-role messages and strips trailing assistant messages.
+ * Returns a new array — does not mutate the input.
+ */
+export function ensureValidMessages(messages: LLMMessage[]): LLMMessage[] {
+  if (messages.length === 0) return [];
+
+  // Merge consecutive same-role messages
+  const merged: LLMMessage[] = [];
+  for (const msg of messages) {
+    const prev = merged[merged.length - 1];
+    if (prev && prev.role === msg.role) {
+      prev.content = [...toBlocks(prev.content), ...toBlocks(msg.content)];
+    } else {
+      merged.push({ role: msg.role, content: msg.content });
+    }
+  }
+
+  // Strip trailing assistant messages
+  while (merged.length > 0 && merged[merged.length - 1].role === "assistant") {
+    merged.pop();
+  }
+
+  return merged;
+}
+
+/**
+ * Append text to the last message if it is a user message, otherwise push a new
+ * user message. Returns the new message when one was created, or null if the
+ * text was merged into the existing message.
+ */
+export function appendOrPushUserText(messages: LLMMessage[], text: string): LLMMessage | null {
+  const last = messages[messages.length - 1];
+  if (last && last.role === "user") {
+    if (typeof last.content === "string") {
+      last.content = last.content + "\n\n" + text;
+    } else {
+      last.content.push({ type: "text", text });
+    }
+    return null;
+  }
+  const msg: LLMMessage = { role: "user", content: text };
+  messages.push(msg);
+  return msg;
+}
+
 export async function callLLM(opts: {
   messages: LLMMessage[];
   tools: LLMTool[];
@@ -118,8 +170,11 @@ export async function callLLM(opts: {
     tools[tools.length - 1].cache_control = { type: "ephemeral" };
   }
 
+  // Sanitize messages: merge consecutive same-role and strip trailing assistant
+  const sanitizedMessages = ensureValidMessages(opts.messages);
+
   // Convert messages
-  const messages: Anthropic.MessageParam[] = opts.messages.map((m) => {
+  const messages: Anthropic.MessageParam[] = sanitizedMessages.map((m) => {
     if (typeof m.content === "string") {
       return { role: m.role, content: m.content };
     }
@@ -157,7 +212,7 @@ export async function callLLM(opts: {
 
   log.info("llm", "Request", {
     model,
-    messages: opts.messages.length,
+    messages: sanitizedMessages.length,
     tools: tools.length,
     isOAuth,
   });

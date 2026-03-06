@@ -6,6 +6,7 @@ import type { AuthStorage } from "./auth/storage";
 import {
   callLLM,
   LLMTimeoutError,
+  appendOrPushUserText,
   type LLMContentBlock,
   type LLMMessage,
   type LLMResponse,
@@ -137,9 +138,10 @@ async function runFlushAndCompact(opts: {
   systemPrompt: string;
   totalTokens: number;
 }): Promise<void> {
-  const flushMsg: LLMMessage = { role: "user", content: buildFlushPrompt() };
-  opts.history.push(flushMsg);
-  opts.newMessages.push(flushMsg);
+  const flushMsg = appendOrPushUserText(opts.history, buildFlushPrompt());
+  if (flushMsg) {
+    opts.newMessages.push(flushMsg);
+  }
 
   let flushTokens = opts.totalTokens;
   for (let flushTurn = 1; flushTurn <= MAX_FLUSH_TURNS; flushTurn++) {
@@ -338,12 +340,13 @@ export async function runAgent(
     const isFinalIteration = remaining === 0;
 
     if (remaining <= FINALIZATION_WARNING_THRESHOLD && !hasInjectedFinalizationPrompt) {
-      const finalizationMsg: LLMMessage = {
-        role: "user",
-        content: formatFinalizationPrompt(iteration, MAX_ITERATIONS),
-      };
-      history.push(finalizationMsg);
-      newMessages.push(finalizationMsg);
+      const finalizationMsg = appendOrPushUserText(
+        history,
+        formatFinalizationPrompt(iteration, MAX_ITERATIONS),
+      );
+      if (finalizationMsg) {
+        newMessages.push(finalizationMsg);
+      }
       hasInjectedFinalizationPrompt = true;
     }
 
