@@ -112,6 +112,7 @@ export function getReplyContext(replyMsg: unknown): string | null {
 
 export function createTelegramChannel(opts: {
   token: string;
+  chatId?: string;
   onMessage: (
     chatId: string,
     content: string | LLMContentBlock[],
@@ -120,6 +121,17 @@ export function createTelegramChannel(opts: {
   transcribe?: TranscribeFn;
 }): Channel {
   const bot = new Bot(opts.token);
+
+  // Only accept messages from the configured chat
+  if (opts.chatId) {
+    const allowedChatId = opts.chatId;
+    bot.use(async (ctx, next) => {
+      if (ctx.chat?.id.toString() !== allowedChatId) {
+        return;
+      }
+      await next();
+    });
+  }
 
   // Per-chat mutex to prevent concurrent agent runs
   const chatLocks = new Map<string, Promise<void>>();

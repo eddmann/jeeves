@@ -175,6 +175,7 @@ async function main() {
   if (telegramToken) {
     channel = createTelegramChannel({
       token: telegramToken,
+      chatId,
       transcribe,
       onMessage: async (msgChatId, content, onProgress) => {
         return withAgentLock(async () => {
