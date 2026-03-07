@@ -121,6 +121,19 @@ export function createTelegramChannel(opts: {
 }): Channel {
   const bot = new Bot(opts.token);
 
+  // Reject messages from unauthorized chats
+  const allowedChatId = process.env.TELEGRAM_CHAT_ID;
+  if (allowedChatId) {
+    bot.use((ctx, next) => {
+      const chatId = ctx.chat?.id.toString();
+      if (chatId !== allowedChatId) {
+        log.warn("telegram", "Unauthorized chat", { chatId });
+        return;
+      }
+      return next();
+    });
+  }
+
   // Per-chat mutex to prevent concurrent agent runs
   const chatLocks = new Map<string, Promise<void>>();
 
