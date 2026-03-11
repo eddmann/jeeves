@@ -7,7 +7,7 @@ import type { Tool } from "./index";
 const EXA_SEARCH_URL = "https://mcp.exa.ai/mcp";
 const MAX_RESULTS = 10;
 const DEFAULT_RESULTS = 5;
-const CONTEXT_MAX_CHARS = 1024;
+const CONTEXT_MAX_CHARS = 10_000;
 
 interface ExaResponse {
   jsonrpc: "2.0";
