@@ -7,6 +7,7 @@ import type { Tool } from "./index";
 const EXA_SEARCH_URL = "https://mcp.exa.ai/mcp";
 const MAX_RESULTS = 10;
 const DEFAULT_RESULTS = 5;
+const CONTEXT_MAX_CHARS = 1024;
 
 interface ExaResponse {
   jsonrpc: "2.0";
@@ -63,6 +64,7 @@ export const webSearchTool: Tool = {
               query,
               numResults: count,
               type: "auto",
+              contextMaxCharacters: CONTEXT_MAX_CHARS,
             },
           },
         }),

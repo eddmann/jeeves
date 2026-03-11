@@ -92,6 +92,7 @@ describe("web search tool", () => {
     expect(parsed.params.name).toBe("web_search_exa");
     expect(parsed.params.arguments.query).toBe("hello world");
     expect(parsed.params.arguments.numResults).toBe(3);
+    expect(parsed.params.arguments.contextMaxCharacters).toBe(1024);
   });
 
   test("clamps count to max 10", async () => {
