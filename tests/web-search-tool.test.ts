@@ -11,6 +11,22 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
+function makeExaSSE(content: { type: string; text: string }[]): string {
+  return `event: message\ndata: ${JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    result: { content },
+  })}\n\n`;
+}
+
+function makeExaErrorSSE(code: number, message: string): string {
+  return `event: message\ndata: ${JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    error: { code, message },
+  })}\n\n`;
+}
+
 function stubFetch(body: string, init?: { status?: number; statusText?: string }) {
   globalThis.fetch = async () =>
     new Response(body, {
@@ -19,30 +35,17 @@ function stubFetch(body: string, init?: { status?: number; statusText?: string }
     });
 }
 
-const DDG_HTML = `<html><body>
-  <div class="result">
-    <a class="result__a" href="https://example.com/one">First Result</a>
-    <a class="result__snippet">Description of first result</a>
-  </div>
-  <div class="result">
-    <a class="result__a" href="https://example.com/two">Second Result</a>
-    <a class="result__snippet">Description of second result</a>
-  </div>
-  <div class="result">
-    <a class="result__a" href="https://example.com/three">Third Result</a>
-    <a class="result__snippet">Description of third result</a>
-  </div>
-</body></html>`;
+const EXA_RESULTS = makeExaSSE([
+  { type: "text", text: "First result about testing" },
+  { type: "text", text: "Second result about testing" },
+]);
 
 describe("web search tool", () => {
-  test("returns formatted results from valid DDG HTML", async () => {
-    stubFetch(DDG_HTML);
+  test("returns formatted results from Exa response", async () => {
+    stubFetch(EXA_RESULTS);
     const result = await webSearchTool.execute({ query: "test query" });
-    expect(result).toContain("1. First Result");
-    expect(result).toContain("https://example.com/one");
-    expect(result).toContain("Description of first result");
-    expect(result).toContain("2. Second Result");
-    expect(result).toContain("3. Third Result");
+    expect(result).toContain("First result about testing");
+    expect(result).toContain("Second result about testing");
   });
 
   test("returns error on fetch failure", async () => {
@@ -59,55 +62,55 @@ describe("web search tool", () => {
     expect(result).toBe("Search failed: HTTP 503 Service Unavailable");
   });
 
-  test("respects count parameter", async () => {
-    stubFetch(DDG_HTML);
-    const result = await webSearchTool.execute({ query: "test", count: 2 });
-    expect(result).toContain("1. First Result");
-    expect(result).toContain("2. Second Result");
-    expect(result).not.toContain("3. Third Result");
-  });
-
-  test("clamps count to max 10", async () => {
-    stubFetch(DDG_HTML);
-    const result = await webSearchTool.execute({ query: "test", count: 50 });
-    // Only 3 results available in HTML, so all 3 should show
-    expect(result).toContain("1. First Result");
-    expect(result).toContain("2. Second Result");
-    expect(result).toContain("3. Third Result");
+  test("returns error on Exa API error", async () => {
+    stubFetch(makeExaErrorSSE(-32600, "Invalid request"));
+    const result = await webSearchTool.execute({ query: "test" });
+    expect(result).toBe("Search failed: Invalid request");
   });
 
   test("handles empty results", async () => {
-    stubFetch("<html><body><div>No results</div></body></html>");
+    stubFetch(makeExaSSE([]));
     const result = await webSearchTool.execute({ query: "xyzzy nonsense" });
     expect(result).toContain('No results found for "xyzzy nonsense"');
   });
 
-  test("encodes query in URL", async () => {
-    let capturedUrl = "";
-    globalThis.fetch = async (url: string | URL | Request) => {
-      capturedUrl = typeof url === "string" ? url : url.toString();
-      return new Response(DDG_HTML);
-    };
-    await webSearchTool.execute({ query: "hello world" });
-    expect(capturedUrl).toContain("q=hello%20world");
+  test("handles SSE parsing error", async () => {
+    stubFetch("not a valid SSE response");
+    const result = await webSearchTool.execute({ query: "test" });
+    expect(result).toContain("Search error:");
   });
 
-  test("sends browser-like headers", async () => {
-    let capturedHeaders: HeadersInit | undefined;
+  test("sends correct JSON-RPC body with query and count", async () => {
+    let capturedBody = "";
     globalThis.fetch = async (_url: string | URL | Request, init?: RequestInit) => {
-      capturedHeaders = init?.headers;
-      return new Response(DDG_HTML);
+      capturedBody = typeof init?.body === "string" ? init.body : "";
+      return new Response(EXA_RESULTS);
     };
-    await webSearchTool.execute({ query: "test" });
-    const headers = capturedHeaders as Record<string, string>;
-    expect(headers["User-Agent"]).toContain("Mozilla/5.0");
+    await webSearchTool.execute({ query: "hello world", count: 3 });
+    const parsed = JSON.parse(capturedBody);
+    expect(parsed.method).toBe("tools/call");
+    expect(parsed.params.name).toBe("web_search_exa");
+    expect(parsed.params.arguments.query).toBe("hello world");
+    expect(parsed.params.arguments.numResults).toBe(3);
+    expect(parsed.params.arguments.contextMaxCharacters).toBe(10_000);
+  });
+
+  test("clamps count to max 10", async () => {
+    let capturedBody = "";
+    globalThis.fetch = async (_url: string | URL | Request, init?: RequestInit) => {
+      capturedBody = typeof init?.body === "string" ? init.body : "";
+      return new Response(EXA_RESULTS);
+    };
+    await webSearchTool.execute({ query: "test", count: 50 });
+    const parsed = JSON.parse(capturedBody);
+    expect(parsed.params.arguments.numResults).toBe(10);
   });
 
   test("passes AbortSignal for timeout", async () => {
     let capturedSignal: AbortSignal | undefined;
     globalThis.fetch = async (_url: string | URL | Request, init?: RequestInit) => {
       capturedSignal = init?.signal ?? undefined;
-      return new Response(DDG_HTML);
+      return new Response(EXA_RESULTS);
     };
     await webSearchTool.execute({ query: "test" });
     expect(capturedSignal).toBeDefined();

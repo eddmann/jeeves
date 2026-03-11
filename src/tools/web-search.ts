@@ -1,17 +1,34 @@
 /**
- * Web search tool using DuckDuckGo HTML interface.
+ * Web search tool using Exa AI neural search via JSON-RPC/SSE.
  */
 
-import { parseHTML } from "linkedom";
 import type { Tool } from "./index";
 
+const EXA_SEARCH_URL = "https://mcp.exa.ai/mcp";
 const MAX_RESULTS = 10;
 const DEFAULT_RESULTS = 5;
+const CONTEXT_MAX_CHARS = 10_000;
+
+interface ExaResponse {
+  jsonrpc: "2.0";
+  id: number;
+  result?: { content?: { type: string; text: string }[] };
+  error?: { code: number; message: string };
+}
+
+function parseSSEResponse(text: string): string {
+  for (const line of text.split("\n")) {
+    if (line.startsWith("data: ")) {
+      return line.substring(6);
+    }
+  }
+  throw new Error("No data field found in SSE response");
+}
 
 export const webSearchTool: Tool = {
   name: "web_search",
   description:
-    "Search the web using DuckDuckGo. Returns a list of results with titles, URLs, and snippets.",
+    "Search the web using Exa AI. Returns a list of results with titles, URLs, and snippets.",
   inputSchema: {
     type: "object",
     properties: {
@@ -31,22 +48,26 @@ export const webSearchTool: Tool = {
     const count = Math.min(Math.max((input.count as number) || DEFAULT_RESULTS, 1), MAX_RESULTS);
 
     try {
-      const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-      const response = await fetch(url, {
+      const response = await fetch(EXA_SEARCH_URL, {
+        method: "POST",
         headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-          Accept:
-            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-          "Accept-Language": "en-GB,en;q=0.5",
-          "Cache-Control": "no-cache",
-          "Sec-Fetch-Dest": "document",
-          "Sec-Fetch-Mode": "navigate",
-          "Sec-Fetch-Site": "none",
-          "Sec-Fetch-User": "?1",
-          "Upgrade-Insecure-Requests": "1",
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
         },
-        redirect: "follow",
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: Date.now(),
+          method: "tools/call",
+          params: {
+            name: "web_search_exa",
+            arguments: {
+              query,
+              numResults: count,
+              type: "auto",
+              contextMaxCharacters: CONTEXT_MAX_CHARS,
+            },
+          },
+        }),
         signal: AbortSignal.timeout(15_000),
       });
 
@@ -54,28 +75,22 @@ export const webSearchTool: Tool = {
         return `Search failed: HTTP ${response.status} ${response.statusText}`;
       }
 
-      const html = await response.text();
-      const { document } = parseHTML(html);
+      const text = await response.text();
+      const jsonData = parseSSEResponse(text);
+      const parsed: ExaResponse = JSON.parse(jsonData);
 
-      const resultElements = document.querySelectorAll(".result__a");
-      if (resultElements.length === 0) {
+      if (parsed.error) {
+        return `Search failed: ${parsed.error.message}`;
+      }
+
+      if (!parsed.result?.content?.length) {
         return `No results found for "${query}"`;
       }
 
-      const results: string[] = [];
-      for (let i = 0; i < Math.min(resultElements.length, count); i++) {
-        const linkEl = resultElements[i] as unknown as HTMLAnchorElement;
-        const title = linkEl.textContent?.trim() ?? "";
-        const href = linkEl.getAttribute("href") ?? "";
-
-        const resultItem = linkEl.closest(".result");
-        const snippetEl = resultItem?.querySelector(".result__snippet");
-        const snippet = snippetEl?.textContent?.trim() ?? "";
-
-        results.push(`${i + 1}. ${title}\n   ${href}\n   ${snippet}`);
-      }
-
-      return results.join("\n\n");
+      return parsed.result.content
+        .filter((item) => item.type === "text")
+        .map((item) => item.text)
+        .join("\n\n");
     } catch (err) {
       return `Search error: ${err instanceof Error ? err.message : String(err)}`;
     }
