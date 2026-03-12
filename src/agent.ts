@@ -138,16 +138,15 @@ async function runFlushAndCompact(opts: {
   totalTokens: number;
 }): Promise<void> {
   const flushMsg: LLMMessage = { role: "user", content: buildFlushPrompt() };
-  opts.history.push(flushMsg);
-  opts.newMessages.push(flushMsg);
+  const flushHistory = [...opts.history];
+  flushHistory.push(flushMsg);
 
-  let flushTokens = opts.totalTokens;
   for (let flushTurn = 1; flushTurn <= MAX_FLUSH_TURNS; flushTurn++) {
     let response: LLMResponse | null = null;
     for (let attempt = 0; attempt <= LLM_TIMEOUT_RETRIES; attempt++) {
       try {
         response = await opts.llmFn({
-          messages: opts.history,
+          messages: flushHistory,
           tools: opts.llmTools,
           systemPrompt: opts.systemPrompt,
           authStorage: opts.ctx.authStorage,
@@ -174,11 +173,6 @@ async function runFlushAndCompact(opts: {
     if (!response) break;
 
     const toolCalls = response.toolCalls;
-    flushTokens =
-      response.usage.inputTokens +
-      response.usage.outputTokens +
-      response.usage.cacheCreationInputTokens +
-      response.usage.cacheReadInputTokens;
 
     const assistantContent: LLMContentBlock[] = [];
     if (response.text) {
@@ -200,8 +194,7 @@ async function runFlushAndCompact(opts: {
           ? assistantContent[0].text
           : assistantContent,
     };
-    opts.history.push(assistantMsg);
-    opts.newMessages.push(assistantMsg);
+    flushHistory.push(assistantMsg);
 
     if (response.stopReason === "end_turn" || toolCalls.length === 0) {
       break;
@@ -234,15 +227,20 @@ async function runFlushAndCompact(opts: {
     }
 
     const toolResultMsg: LLMMessage = { role: "user", content: toolResults };
-    opts.history.push(toolResultMsg);
-    opts.newMessages.push(toolResultMsg);
+    flushHistory.push(toolResultMsg);
+  }
+
+  // Persist flush messages for audit trail (before compaction marker)
+  const flushOnlyMessages = flushHistory.slice(opts.history.length);
+  if (flushOnlyMessages.length > 0) {
+    opts.ctx.sessionStore.append(opts.ctx.sessionKey, sanitizeForPersist(flushOnlyMessages));
   }
 
   await compactAndSync({
     ctx: opts.ctx,
     history: opts.history,
     newMessages: opts.newMessages,
-    totalTokens: flushTokens,
+    totalTokens: opts.totalTokens,
     llmFn: opts.llmFn,
     reason: "Compacting session after out-of-band memory flush",
   });
