@@ -603,6 +603,65 @@ describe("agent loop", () => {
     expect(saved[0].content).toContain("[Previous conversation summary]");
   });
 
+  test("flush messages do not leak into working history after compaction", async () => {
+    const flushZoneTokens = CONTEXT_WINDOW - FLUSH_COMPACT_MARGIN + 100;
+    const tool = buildStubTool("write_file", "ok");
+    const sessionStore = new SessionStore(tmpDir);
+    let callCount = 0;
+    const flushUsage = {
+      inputTokens: flushZoneTokens,
+      outputTokens: 50,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+    };
+
+    const ctx: AgentContext = {
+      authStorage: buildStubAuth(),
+      tools: [tool],
+      skills: [],
+      workspaceFiles: [],
+      sessionStore,
+      sessionKey: "flush-leak-test",
+      memoryIndex,
+      callLLM: async () => {
+        callCount++;
+        if (callCount === 1) {
+          return buildLLMResponse({
+            text: "Here is your answer",
+            stopReason: "end_turn",
+            usage: flushUsage,
+          });
+        }
+        if (callCount === 2) {
+          return buildLLMResponse({
+            text: "",
+            toolCalls: [{ id: "tc1", name: "write_file", input: { path: "memory/2026-01-01.md" } }],
+            stopReason: "tool_use",
+            usage: flushUsage,
+          });
+        }
+        if (callCount === 3) {
+          return buildLLMResponse({
+            text: "Memory saved",
+            stopReason: "end_turn",
+            usage: flushUsage,
+          });
+        }
+        return buildLLMResponse({ text: "Summary of conversation" });
+      },
+    };
+
+    await runAgent(ctx, "trigger flush");
+
+    // After compaction, the session store should not contain flush prompt text
+    const saved = sessionStore.get("flush-leak-test");
+    const allContent = saved
+      .map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content)))
+      .join(" ");
+    expect(allContent).not.toContain("Pre-compaction memory flush");
+    expect(allContent).not.toContain("Memory saved");
+  });
+
   test("accepts LLMContentBlock[] as userMessage with image blocks", async () => {
     let receivedMessageCount = 0;
     let hadImageBlock = false;
