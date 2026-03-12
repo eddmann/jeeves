@@ -141,7 +141,6 @@ async function runFlushAndCompact(opts: {
   const flushHistory = [...opts.history];
   flushHistory.push(flushMsg);
 
-  let flushTokens = opts.totalTokens;
   for (let flushTurn = 1; flushTurn <= MAX_FLUSH_TURNS; flushTurn++) {
     let response: LLMResponse | null = null;
     for (let attempt = 0; attempt <= LLM_TIMEOUT_RETRIES; attempt++) {
@@ -174,11 +173,6 @@ async function runFlushAndCompact(opts: {
     if (!response) break;
 
     const toolCalls = response.toolCalls;
-    flushTokens =
-      response.usage.inputTokens +
-      response.usage.outputTokens +
-      response.usage.cacheCreationInputTokens +
-      response.usage.cacheReadInputTokens;
 
     const assistantContent: LLMContentBlock[] = [];
     if (response.text) {
@@ -246,7 +240,7 @@ async function runFlushAndCompact(opts: {
     ctx: opts.ctx,
     history: opts.history,
     newMessages: opts.newMessages,
-    totalTokens: flushTokens,
+    totalTokens: opts.totalTokens,
     llmFn: opts.llmFn,
     reason: "Compacting session after out-of-band memory flush",
   });
