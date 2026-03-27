@@ -57,7 +57,8 @@ src/heartbeat.ts         → periodic agent check-ins with dedup + active hours
 src/progress.ts          → progress update formatting for Telegram
 src/transcribe.ts        → OpenAI Whisper audio transcription wrapper
 src/auth/                → OAuth PKCE, token storage + auto-refresh, stealth mode
-src/channel/telegram.ts  → grammY bot, markdown→HTML, message splitting, photo/voice/audio
+src/media.ts             → file type detection for attachment delivery
+src/channel/telegram.ts  → grammY bot, markdown→HTML, message splitting, photo/voice/audio, outbox attachments
 src/tools/               → tool implementations (see tool list below)
 src/cron/                → cron scheduler + JSONL job persistence
 src/memory/              → SQLite memory index (vector + FTS5), compaction, embeddings
@@ -65,7 +66,7 @@ src/workspace/           → convention file loading, workspace init, system pro
 src/skills/              → SKILL.md discovery + system prompt formatting
 ```
 
-Agent tools: `bash`, `read` (read_file), `write` (write_file), `edit` (edit_file), `web_fetch`, `web_search`, `cron`, `memory_search`. All scoped to workspace directory. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed system design.
+Agent tools: `bash`, `read` (read_file), `write` (write_file), `edit` (edit_file), `web_fetch`, `web_search`, `cron`, `memory_search`, `attach`. The `attach` tool declares files to send back to the user (write to `outbox/` first, then attach). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed system design.
 
 ### Skills
 

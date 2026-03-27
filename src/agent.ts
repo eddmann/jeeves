@@ -10,7 +10,7 @@ import {
   type LLMMessage,
   type LLMResponse,
 } from "./llm";
-import type { Tool } from "./tools/index";
+import { createAttachTool, type Tool } from "./tools/index";
 import type { Skill } from "./skills/loader";
 import type { WorkspaceFile } from "./workspace/loader";
 import { buildSystemPrompt } from "./workspace/prompt";
@@ -66,6 +66,11 @@ export function formatFinalizationPrompt(iteration: number, max: number): string
 /** Identify timeout failures from the LLM client. */
 export function isLLMTimeoutError(err: unknown): boolean {
   return err instanceof LLMTimeoutError;
+}
+
+export interface AgentResult {
+  text: string;
+  attachments: string[];
 }
 
 export interface AgentContext {
@@ -250,7 +255,7 @@ export async function runAgent(
   ctx: AgentContext,
   userMessage: string | LLMContentBlock[],
   onProgress?: (update: ProgressUpdate) => Promise<void>,
-): Promise<string> {
+): Promise<AgentResult> {
   const preview =
     typeof userMessage === "string"
       ? userMessage.slice(0, 100)
@@ -286,15 +291,17 @@ export async function runAgent(
   // Track new messages for append
   const newMessages: LLMMessage[] = [userMsg];
 
-  // Build tools for LLM
-  const llmTools = ctx.tools.map((t) => ({
+  // Build tools for LLM (attach tool created per-run with its own accumulator)
+  const attachments: string[] = [];
+  const allTools = [...ctx.tools, createAttachTool({ attachments })];
+  const llmTools = allTools.map((t) => ({
     name: t.name,
     description: t.description,
     input_schema: t.inputSchema,
   }));
 
   // Tool lookup
-  const toolMap = new Map(ctx.tools.map((t) => [t.name, t]));
+  const toolMap = new Map(allTools.map((t) => [t.name, t]));
 
   // Compaction state
   let totalTokens = 0;
@@ -372,7 +379,7 @@ export async function runAgent(
 
         if (!hasRetryLeft) {
           ctx.sessionStore.append(ctx.sessionKey, sanitizeForPersist(newMessages));
-          return LLM_TIMEOUT_FALLBACK_MESSAGE;
+          return { text: LLM_TIMEOUT_FALLBACK_MESSAGE, attachments };
         }
 
         const backoffMs = LLM_TIMEOUT_BASE_BACKOFF_MS * attemptNumber;
@@ -381,7 +388,7 @@ export async function runAgent(
     }
     if (!response) {
       ctx.sessionStore.append(ctx.sessionKey, sanitizeForPersist(newMessages));
-      return LLM_TIMEOUT_FALLBACK_MESSAGE;
+      return { text: LLM_TIMEOUT_FALLBACK_MESSAGE, attachments };
     }
 
     const toolCalls = isFinalIteration ? [] : response.toolCalls;
@@ -444,11 +451,11 @@ export async function runAgent(
           systemPrompt,
           totalTokens,
         });
-        return finalResponseText;
+        return { text: finalResponseText, attachments };
       }
 
       ctx.sessionStore.append(ctx.sessionKey, sanitizeForPersist(newMessages));
-      return finalResponseText;
+      return { text: finalResponseText, attachments };
     }
 
     // Execute tool calls
@@ -517,5 +524,5 @@ export async function runAgent(
   // Max iterations reached
   ctx.sessionStore.append(ctx.sessionKey, sanitizeForPersist(newMessages));
   log.warn("agent", "Max iterations reached", { max: MAX_ITERATIONS });
-  return MAX_ITERATIONS_FALLBACK_MESSAGE;
+  return { text: MAX_ITERATIONS_FALLBACK_MESSAGE, attachments };
 }

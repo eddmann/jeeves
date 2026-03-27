@@ -12,6 +12,7 @@ import { webFetchTool } from "./web-fetch";
 import { webSearchTool } from "./web-search";
 import { createCronTool } from "./cron";
 import { createMemorySearchTool } from "./memory-search";
+export { createAttachTool } from "./attach";
 
 export interface Tool {
   name: string;

@@ -5,6 +5,7 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { log, formatError } from "./logger";
+import type { AgentResult } from "./agent";
 
 export class HeartbeatRunner {
   private interval: ReturnType<typeof setInterval> | null = null;
@@ -15,8 +16,8 @@ export class HeartbeatRunner {
     private opts: {
       intervalMs: number;
       workspaceDir: string;
-      runAgent: (message: string) => Promise<string>;
-      sendToChannel: (text: string) => Promise<void>;
+      runAgent: (message: string) => Promise<AgentResult>;
+      sendToChannel: (text: string, attachments: string[]) => Promise<void>;
       activeHours?: { start: string; end: string; timezone?: string };
     },
   ) {}
@@ -59,8 +60,8 @@ export class HeartbeatRunner {
       // Run agent with heartbeat prompt
       const prompt =
         "Read HEARTBEAT.md and follow its instructions. If nothing needs attention, reply with exactly HEARTBEAT_OK.";
-      const response = await this.opts.runAgent(prompt);
-      const trimmed = response.trim();
+      const result = await this.opts.runAgent(prompt);
+      const trimmed = result.text.trim();
 
       // Suppress HEARTBEAT_OK
       if (trimmed === "HEARTBEAT_OK") {
@@ -77,7 +78,7 @@ export class HeartbeatRunner {
 
       // Send to channel
       log.info("heartbeat", "Check", { result: "sent" });
-      await this.opts.sendToChannel(response);
+      await this.opts.sendToChannel(result.text, result.attachments);
       this.lastSentText = trimmed;
       this.lastSentAt = now;
     } catch (err) {

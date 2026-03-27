@@ -105,6 +105,7 @@ export function initWorkspace(workspaceDir: string, templateDir: string): void {
   mkdirSync(join(workspaceDir, "memory"), { recursive: true });
   mkdirSync(join(workspaceDir, "sessions"), { recursive: true });
   mkdirSync(join(workspaceDir, "cron"), { recursive: true });
+  mkdirSync(join(workspaceDir, "outbox"), { recursive: true });
 
   // Seed .env if it doesn't exist
   const envPath = join(workspaceDir, ".env");

@@ -85,7 +85,7 @@ describe("agent loop", () => {
 
     const result = await runAgent(ctx, "Hi");
 
-    expect(result).toBe("Hello there!");
+    expect(result.text).toBe("Hello there!");
   });
 
   test("executes tool and passes result back to LLM", async () => {
@@ -104,7 +104,7 @@ describe("agent loop", () => {
 
     const result = await runAgent(ctx, "list files");
 
-    expect(result).toBe("I ran the command");
+    expect(result.text).toBe("I ran the command");
     expect(tool.calls.length).toBe(1);
     expect(tool.calls[0]).toEqual({ command: "ls" });
   });
@@ -129,7 +129,7 @@ describe("agent loop", () => {
 
     const result = await runAgent(ctx, "do both");
 
-    expect(result).toBe("Both done");
+    expect(result.text).toBe("Both done");
     expect(bashTool.calls.length).toBe(1);
     expect(readTool.calls.length).toBe(1);
   });
@@ -155,7 +155,7 @@ describe("agent loop", () => {
 
     const result = await runAgent(ctx, "multi step");
 
-    expect(result).toBe("All done");
+    expect(result.text).toBe("All done");
     expect(ctx.callCount).toBe(3);
   });
 
@@ -173,7 +173,7 @@ describe("agent loop", () => {
 
     const result = await runAgent(ctx, "infinite loop");
 
-    expect(result).toBe(MAX_ITERATIONS_FALLBACK_MESSAGE);
+    expect(result.text).toBe(MAX_ITERATIONS_FALLBACK_MESSAGE);
     expect(ctx.callCount).toBe(MAX_ITERATIONS);
   });
 
@@ -198,7 +198,7 @@ describe("agent loop", () => {
 
     const result = await runAgent(ctx, "hello");
 
-    expect(result).toBe("recovered");
+    expect(result.text).toBe("recovered");
     expect(callCount).toBe(2);
   });
 
@@ -221,7 +221,7 @@ describe("agent loop", () => {
 
     const result = await runAgent(ctx, "hello");
 
-    expect(result).toBe(LLM_TIMEOUT_FALLBACK_MESSAGE);
+    expect(result.text).toBe(LLM_TIMEOUT_FALLBACK_MESSAGE);
     expect(callCount).toBe(LLM_TIMEOUT_RETRIES + 1);
     const saved = sessionStore.get("timeout-retry-exhausted");
     expect(saved.length).toBeGreaterThan(0);
@@ -261,7 +261,7 @@ describe("agent loop", () => {
 
     const result = await runAgent(ctx, "use unknown tool");
 
-    expect(result).toBe("handled");
+    expect(result.text).toBe("handled");
   });
 
   test("recovers from tool execution errors", async () => {
@@ -283,7 +283,7 @@ describe("agent loop", () => {
 
     const result = await runAgent(ctx, "fail");
 
-    expect(result).toBe("handled error");
+    expect(result.text).toBe("handled error");
   });
 
   test("persists session history after completion", async () => {
@@ -398,8 +398,41 @@ describe("agent loop", () => {
 
     await runAgent(ctx, "hi");
 
-    expect(receivedTools.length).toBe(1);
-    expect((receivedTools[0] as { name: string }).name).toBe("bash");
+    const toolNames = receivedTools.map((t) => (t as { name: string }).name);
+    expect(toolNames).toContain("bash");
+    expect(toolNames).toContain("attach");
+  });
+
+  test("returns attachments accumulated via attach tool", async () => {
+    const ctx = makeCtx({
+      llmResponses: [
+        buildLLMResponse({
+          text: "",
+          toolCalls: [
+            { id: "tc1", name: "attach", input: { path: "outbox/chart.png" } },
+            { id: "tc2", name: "attach", input: { path: "outbox/data.csv" } },
+          ],
+          stopReason: "tool_use",
+        }),
+        buildLLMResponse({ text: "Here are your files." }),
+      ],
+    });
+
+    const result = await runAgent(ctx, "make a chart");
+
+    expect(result.text).toBe("Here are your files.");
+    expect(result.attachments).toEqual(["outbox/chart.png", "outbox/data.csv"]);
+  });
+
+  test("returns empty attachments when attach tool is not called", async () => {
+    const ctx = makeCtx({
+      llmResponses: [buildLLMResponse({ text: "No files needed." })],
+    });
+
+    const result = await runAgent(ctx, "hello");
+
+    expect(result.text).toBe("No files needed.");
+    expect(result.attachments).toEqual([]);
   });
 
   test("handles responses with both text and tool calls", async () => {
@@ -418,7 +451,7 @@ describe("agent loop", () => {
 
     const result = await runAgent(ctx, "check");
 
-    expect(result).toBe("Here's what I found");
+    expect(result.text).toBe("Here's what I found");
     expect(tool.calls.length).toBe(1);
   });
 
@@ -534,7 +567,7 @@ describe("agent loop", () => {
 
     const result = await runAgent(ctx, "new message");
 
-    expect(result).toBe("Hello after compaction");
+    expect(result.text).toBe("Hello after compaction");
     // Session should have been compacted (summary prepended)
     const saved = sessionStore.get("preemptive-test");
     expect(saved[0].content).toContain("[Previous conversation summary]");
@@ -596,7 +629,7 @@ describe("agent loop", () => {
     const result = await runAgent(ctx, "trigger flush");
 
     // Flush turn stays silent to the user; return the pre-flush user-facing answer.
-    expect(result).toBe("Here's your answer");
+    expect(result.text).toBe("Here's your answer");
 
     // Session should have been compacted (summary prepended)
     const saved = sessionStore.get("flush-compact-test");
@@ -694,7 +727,7 @@ describe("agent loop", () => {
 
     const result = await runAgent(ctx, content);
 
-    expect(result).toBe("I see the image");
+    expect(result.text).toBe("I see the image");
     expect(receivedMessageCount).toBe(1);
     expect(hadImageBlock).toBe(true);
   });
@@ -757,7 +790,7 @@ describe("agent loop", () => {
 
     const result = await runAgent(ctx, "go");
 
-    expect(result).toBe("final answer");
+    expect(result.text).toBe("final answer");
     expect(callCount).toBe(MAX_ITERATIONS);
     expect(toolsPerCall[MAX_ITERATIONS - 1]).toBe(0);
     expect(tool.calls.length).toBe(MAX_ITERATIONS - 1);
@@ -820,7 +853,7 @@ describe("agent loop", () => {
 
     const result = await runAgent(ctx, "go");
 
-    expect(result).toBe("final answer");
+    expect(result.text).toBe("final answer");
     expect(sawFlushPrompt).toBe(true);
     expect(callCount).toBe(MAX_ITERATIONS + 2); // flush turn + compaction summarization
   });

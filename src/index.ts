@@ -137,15 +137,15 @@ async function main() {
     onJobDue: async (job) => {
       await withAgentLock(async () => {
         const ctx = makeAgentContext(`cron_${job.id}`);
-        const response = await runAgent(ctx, job.message);
+        const result = await runAgent(ctx, job.message);
         // Suppress CRON_OK — nothing to report
-        if (response.trim() === "CRON_OK") {
+        if (result.text.trim() === "CRON_OK") {
           log.info("cron", "Suppressed CRON_OK", { name: job.name, id: job.id });
           return;
         }
         // Send cron output to channel if configured
         if (channel && chatId) {
-          await channel.send(chatId, `[Cron: ${job.name}]\n${response}`);
+          await channel.send(chatId, `[Cron: ${job.name}]\n${result.text}`, result.attachments);
         }
       });
     },
@@ -175,6 +175,7 @@ async function main() {
   if (telegramToken) {
     channel = createTelegramChannel({
       token: telegramToken,
+      workspaceDir,
       transcribe,
       onMessage: async (msgChatId, content, onProgress) => {
         return withAgentLock(async () => {
@@ -198,9 +199,9 @@ async function main() {
         return runAgent(ctx, message);
       });
     },
-    sendToChannel: async (text) => {
+    sendToChannel: async (text, attachments) => {
       if (channel && chatId) {
-        await channel.send(chatId, text);
+        await channel.send(chatId, text, attachments);
       }
     },
     activeHours: {

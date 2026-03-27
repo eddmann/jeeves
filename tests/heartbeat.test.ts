@@ -20,7 +20,7 @@ function makeRunner(opts: {
   runAgentError?: Error;
   activeHours?: { start: string; end: string };
 }) {
-  const sendCalls: string[] = [];
+  const sendCalls: Array<{ text: string; attachments: string[] }> = [];
   const runAgentCalls: string[] = [];
 
   const runner = new HeartbeatRunner({
@@ -29,10 +29,10 @@ function makeRunner(opts: {
     runAgent: async (msg: string) => {
       runAgentCalls.push(msg);
       if (opts.runAgentError) throw opts.runAgentError;
-      return opts.runAgentResult ?? "HEARTBEAT_OK";
+      return { text: opts.runAgentResult ?? "HEARTBEAT_OK", attachments: [] };
     },
-    sendToChannel: async (text: string) => {
-      sendCalls.push(text);
+    sendToChannel: async (text: string, attachments: string[]) => {
+      sendCalls.push({ text, attachments });
     },
     activeHours: opts.activeHours,
   });
@@ -112,7 +112,7 @@ describe("periodic heartbeat", () => {
     await runner.runOnce();
 
     expect(sendCalls.length).toBe(1);
-    expect(sendCalls[0]).toBe("Something needs attention!");
+    expect(sendCalls[0].text).toBe("Something needs attention!");
   });
 
   test("deduplicates identical messages within 24 hours", async () => {

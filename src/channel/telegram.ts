@@ -2,17 +2,20 @@
  * Telegram channel using grammY with long polling.
  */
 
-import { Bot, type Context } from "grammy";
+import { resolve } from "path";
+import { Bot, InputFile, type Context } from "grammy";
 import { run, type RunnerHandle } from "@grammyjs/runner";
 import { log, formatError } from "../logger";
 import { formatProgress, type ProgressUpdate } from "../progress";
 import type { LLMContentBlock } from "../llm";
+import type { AgentResult } from "../agent";
 import type { TranscribeFn } from "../transcribe";
+import { isImageFile, isVoiceFile, isAudioFile } from "../media";
 
 export interface Channel {
   start(): Promise<void>;
   stop(): void;
-  send(chatId: string, text: string): Promise<void>;
+  send(chatId: string, text: string, attachments: string[]): Promise<void>;
 }
 
 export const MAX_MESSAGE_LENGTH = 4096;
@@ -112,11 +115,12 @@ export function getReplyContext(replyMsg: unknown): string | null {
 
 export function createTelegramChannel(opts: {
   token: string;
+  workspaceDir: string;
   onMessage: (
     chatId: string,
     content: string | LLMContentBlock[],
     onProgress: (u: ProgressUpdate) => Promise<void>,
-  ) => Promise<string>;
+  ) => Promise<AgentResult>;
   transcribe?: TranscribeFn;
 }): Channel {
   const bot = new Bot(opts.token);
@@ -176,6 +180,27 @@ export function createTelegramChannel(opts: {
     return Buffer.from(await response.arrayBuffer());
   }
 
+  async function sendAttachment(chatId: string, filePath: string): Promise<void> {
+    const fullPath = resolve(opts.workspaceDir, filePath);
+    try {
+      if (isImageFile(filePath)) {
+        await bot.api.sendPhoto(chatId, new InputFile(fullPath));
+      } else if (isVoiceFile(filePath)) {
+        await bot.api.sendVoice(chatId, new InputFile(fullPath));
+      } else if (isAudioFile(filePath)) {
+        await bot.api.sendAudio(chatId, new InputFile(fullPath));
+      } else {
+        await bot.api.sendDocument(chatId, new InputFile(fullPath));
+      }
+      log.info("telegram", "Attachment sent", { chatId, path: filePath });
+    } catch (err) {
+      log.error("telegram", "Failed to send attachment", {
+        path: filePath,
+        ...formatError(err),
+      });
+    }
+  }
+
   // Shared handler for all incoming message types
   async function handleIncoming(
     ctx: Context,
@@ -203,19 +228,17 @@ export function createTelegramChannel(opts: {
       let statusMessageId: number | null = null;
       let lastEditTime = 0;
       const progressStart = Date.now();
-      const numericChatId = ctx.chat!.id;
-
       const onProgress = async (update: ProgressUpdate): Promise<void> => {
         const now = Date.now();
         if (now - progressStart < 5000) return;
         const progressText = formatProgress(update);
         try {
           if (statusMessageId === null) {
-            const msg = await bot.api.sendMessage(numericChatId, progressText);
+            const msg = await bot.api.sendMessage(chatId, progressText);
             statusMessageId = msg.message_id;
             lastEditTime = now;
           } else if (now - lastEditTime >= 1000) {
-            await bot.api.editMessageText(numericChatId, statusMessageId, progressText);
+            await bot.api.editMessageText(chatId, statusMessageId, progressText);
             lastEditTime = now;
           }
         } catch {
@@ -224,37 +247,40 @@ export function createTelegramChannel(opts: {
       };
 
       try {
-        const response = await opts.onMessage(chatId, content, onProgress);
+        const result = await opts.onMessage(chatId, content, onProgress);
         clearInterval(typingInterval);
 
         // Delete status message
         if (statusMessageId !== null) {
           try {
-            await bot.api.deleteMessage(numericChatId, statusMessageId);
+            await bot.api.deleteMessage(chatId, statusMessageId);
           } catch {
             // Silently ignore
           }
         }
 
-        const html = markdownToTelegramHTML(response);
-        const chunks = splitMessage(html);
         log.info("telegram", "Response sent", {
           chatId,
-          chars: response.length,
-          chunks: chunks.length,
+          chars: result.text.length,
+          attachments: result.attachments.length,
           ms: Date.now() - messageStart,
         });
-        if (response) {
+        if (result.text) {
           await sendFormatted(
             (t, o) => ctx.reply(t, o as Parameters<typeof ctx.reply>[1]),
-            response,
+            result.text,
           );
+        }
+
+        // Send attachments
+        for (const filePath of result.attachments) {
+          await sendAttachment(chatId, filePath);
         }
       } catch (err) {
         clearInterval(typingInterval);
         if (statusMessageId !== null) {
           try {
-            await bot.api.deleteMessage(numericChatId, statusMessageId);
+            await bot.api.deleteMessage(chatId, statusMessageId);
           } catch {
             // Silently ignore
           }
@@ -353,7 +379,7 @@ export function createTelegramChannel(opts: {
       handle?.stop();
     },
 
-    async send(chatId: string, text: string) {
+    async send(chatId: string, text: string, attachments: string[]) {
       const html = markdownToTelegramHTML(text);
       const chunks = splitMessage(html);
       for (const chunk of chunks) {
@@ -362,6 +388,9 @@ export function createTelegramChannel(opts: {
         } catch {
           await bot.api.sendMessage(chatId, chunk);
         }
+      }
+      for (const filePath of attachments) {
+        await sendAttachment(chatId, filePath);
       }
     },
   };

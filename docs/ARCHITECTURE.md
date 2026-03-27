@@ -123,6 +123,7 @@ All tools registered via `allTools()` in `src/tools/index.ts`:
 | `web_search`    | `tools/web-search.ts`    | `webSearchTool` (singleton)           | DuckDuckGo web search. Returns search results with titles, URLs, and snippets.                                                            |
 | `cron`          | `tools/cron.ts`          | `createCronTool(scheduler)`           | Manage scheduled jobs: add/list/remove/run/status.                                                                                        |
 | `memory_search` | `tools/memory-search.ts` | `createMemorySearchTool(memoryIndex)` | Hybrid search over long-term memory files and past session transcripts. Semantic + keyword with `OPENAI_API_KEY`, keyword-only without.   |
+| `attach`        | `tools/attach.ts`        | `createAttachTool({ attachments })`   | Declare a file to send back to the user. Write to `outbox/` first, then attach.                                                           |
 
 All tools implement the `Tool` interface:
 
@@ -135,7 +136,7 @@ interface Tool {
 }
 ```
 
-Tools always return strings (never throw to the agent) — errors are caught and formatted as error messages.
+Tools always return strings (never throw to the agent) — errors are caught and formatted as error messages. The `attach` tool is created per-run inside `runAgent` (not shared at startup) because it captures a per-run attachments accumulator.
 
 ## Authentication (`src/auth/`)
 
@@ -332,6 +333,7 @@ workspace/
 ├── sessions/         # JSONL conversation history
 ├── logs/             # JSONL structured logs (daily rotation)
 ├── cron/             # job persistence (jobs.json)
+├── outbox/           # agent output files (sent to user via Telegram)
 └── memory/           # episodic memory files (YYYY-MM-DD.md) + index.sqlite
 ```
 
@@ -379,6 +381,22 @@ Each Telegram message type is normalized before reaching the agent loop:
 
 **Reply context**: When a message replies to another, `getReplyContext()` extracts the original text/caption (truncated to 300 chars) and prepends it as `[Replying to: ...]`.
 
+### Message Output Pipeline
+
+`runAgent` returns `AgentResult { text, attachments }`. The Telegram handler:
+
+1. Sends the text response (markdown → HTML → chunked messages)
+2. Sends each attachment via the appropriate Telegram method:
+
+| Extension | Method | Display |
+| --------- | ------ | ------- |
+| jpg/jpeg/png/gif/webp | `sendPhoto` | Inline image |
+| ogg | `sendVoice` | Inline voice note |
+| mp3/m4a/wav/aac | `sendAudio` | Audio player |
+| Everything else | `sendDocument` | File download |
+
+The `channel.send()` method also accepts attachments, so cron jobs and heartbeats can send files too.
+
 ## Logger (`src/logger.ts`)
 
 JSONL structured logger writing to daily rotating files (`workspace/logs/YYYY-MM-DD.jsonl`). Module-level singleton initialized via `initLogger()`. Log levels: `debug`, `info`, `warn`, `error`. No console output — the logger is file-only. When `logDir` is null (default pre-init state), all writes are silently dropped.
@@ -407,8 +425,9 @@ Formats agent iteration progress for display in Telegram:
 11. [If context near limit: runFlushAndCompact() runs out-of-band flush turns]
 12. [Flush helper then compacts immediately: summarize + prune + re-index memory]
 13. Session history saved to disk
-14. Response formatted as Telegram HTML and sent
-15. Agent mutex released
+14. Response text formatted as Telegram HTML and sent
+15. Any attachments sent as photos/voice/audio/documents
+16. Agent mutex released
 ```
 
 ## Key Design Decisions
@@ -426,6 +445,8 @@ Formats agent iteration progress for display in Telegram:
 **Convention files as system prompt injection.** Workspace files are the primary mechanism for customizing the agent's behavior, personality, and knowledge. Each run reloads core convention files plus the two latest episodic memory files, and includes them in every LLM call.
 
 **Flush-and-compact as one operation.** A token threshold triggers an out-of-band flush helper that can perform multi-turn memory persistence, then compacts immediately. This preserves context while keeping the main iteration budget stable.
+
+**Outbox via attach tool.** The agent declares files to send by calling the `attach` tool, which accumulates paths during the run. `runAgent` returns `{ text, attachments }` and the channel layer sends each file.
 
 **Hybrid search for memory retrieval.** Combining vector similarity (semantic) with FTS5 keyword search means queries work even without embeddings (keyword-only fallback) and catch both semantically similar and exact-match content. The brute-force vector scan is acceptable given the expected corpus size for a personal assistant.
 

@@ -8,6 +8,11 @@ const BASE_IDENTITY = `You are Jeeves, a personal AI assistant. You have access 
 
 Be helpful, concise, and proactive. Take action rather than asking for permission on safe operations. Ask before doing anything destructive or externally visible.`;
 
+const OUTBOX_INSTRUCTIONS = `## Outbox
+
+To send files to the user, write them to outbox/ then call attach:
+  attach({ path: "outbox/chart.png" })`;
+
 const SELF_EXTENSION_INSTRUCTIONS = `## Self-Extension
 
 You can extend your own capabilities:
@@ -40,6 +45,9 @@ export function buildSystemPrompt(opts: {
       .join("\n\n");
     sections.push(`## Project Context\n\n${filesSections}`);
   }
+
+  // Outbox instructions
+  sections.push(OUTBOX_INSTRUCTIONS);
 
   // Self-extension instructions
   sections.push(SELF_EXTENSION_INSTRUCTIONS);
