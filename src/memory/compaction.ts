@@ -6,8 +6,8 @@ import type { LLMContentBlock, LLMMessage, LLMResponse } from "../llm";
 import type { AuthStorage } from "../auth/storage";
 import { log, formatError } from "../logger";
 
-export const CONTEXT_WINDOW = 200_000;
-export const FLUSH_COMPACT_MARGIN = 12_192;
+export const CONTEXT_WINDOW = 272_000;
+export const FLUSH_COMPACT_MARGIN = 16_000;
 const SAFETY_MARGIN = 1.2;
 const TARGET_BUDGET_RATIO = 0.5;
 
@@ -39,7 +39,7 @@ export function shouldFlushAndCompact(totalTokens: number): boolean {
   return totalTokens >= CONTEXT_WINDOW - FLUSH_COMPACT_MARGIN;
 }
 
-/** Build the flush prompt asking Claude to save important context to memory. */
+/** Build the flush prompt asking the model to save important context to memory. */
 export function buildFlushPrompt(): string {
   const date = new Date().toISOString().split("T")[0];
   return [
@@ -158,7 +158,7 @@ function formatMessagesForSummary(messages: LLMMessage[]): string {
 
 const SUMMARIZE_SYSTEM = `Summarize the following conversation excerpt. Preserve: key decisions, action items, open questions, important facts, user preferences, and any ongoing tasks. Be concise but comprehensive.`;
 
-/** Summarize messages using Claude. Falls back to simple text summary on failure. */
+/** Summarize messages using the LLM. Falls back to simple text summary on failure. */
 export async function summarizeMessages(opts: {
   messages: LLMMessage[];
   callLLM: CallLLMFn;
@@ -176,7 +176,7 @@ export async function summarizeMessages(opts: {
         tools: [] as never[],
         systemPrompt: SUMMARIZE_SYSTEM,
         authStorage: opts.authStorage,
-        model: "claude-sonnet-4-5-20250929",
+        model: "gpt-5.4",
       });
       if (response.text) {
         partialSummaries.push(response.text);
@@ -194,7 +194,7 @@ export async function summarizeMessages(opts: {
         tools: [] as never[],
         systemPrompt: SUMMARIZE_SYSTEM,
         authStorage: opts.authStorage,
-        model: "claude-sonnet-4-5-20250929",
+        model: "gpt-5.4",
       });
 
       return merged.text || partialSummaries.join("\n\n");

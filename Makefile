@@ -26,9 +26,6 @@ run: ## Run production bundle
 login: ## OAuth PKCE login
 	bun dev login
 
-login/key: ## API key login
-	bun dev login --api-key
-
 logout: ## Remove credentials
 	bun dev logout
 
@@ -42,6 +39,9 @@ test: ## Run all tests
 
 test/watch: ## Run tests in watch mode
 	bun test tests/ --watch
+
+test/integration: ## Run integration tests (requires auth)
+	bun test tests/integration/
 
 t: test ## Alias for test
 

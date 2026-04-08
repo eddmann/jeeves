@@ -6,7 +6,7 @@ Your personal butler, resident in Telegram. Text, photos, or voice — Jeeves at
 
 ## Why
 
-Inspired by [OpenClaw](https://openclaw.ai/), I wanted to peel back what was under the hood and build my own from scratch. Jeeves makes deliberate tradeoffs for simplicity: Anthropic-only (no provider abstraction), Telegram-only (no multi-channel), one user at a time (mutex over concurrency). The result is a small TypeScript codebase that's easy to read and easy to modify.
+Inspired by [OpenClaw](https://openclaw.ai/), I wanted to peel back what was under the hood and build my own from scratch. Jeeves makes deliberate tradeoffs for simplicity: single LLM provider (OpenAI via ChatGPT Codex), Telegram-only (no multi-channel), one user at a time (mutex over concurrency). The result is a small TypeScript codebase that's easy to read and easy to modify.
 
 ## Quick Start
 
@@ -18,7 +18,7 @@ Jeeves can read his own source, understand how he's built, and modify himself. V
 docker run -d --restart unless-stopped \
   -e TELEGRAM_BOT_TOKEN=... \
   -e TELEGRAM_CHAT_ID=... \
-  -e ANTHROPIC_API_KEY=... \
+  -v $(pwd)/auth.json:/app/auth.json \
   -v jeeves-workspace:/app/workspace \
   ghcr.io/eddmann/jeeves:latest
 ```
@@ -29,8 +29,7 @@ docker run -d --restart unless-stopped \
 git clone https://github.com/eddmann/jeeves.git
 cd jeeves
 make deps             # install dependencies
-make login            # OAuth via Claude Pro/Max
-# or: make login/key  # API key login
+make login            # OAuth via ChatGPT Plus/Pro
 ```
 
 Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in your environment or workspace `.env`, then:
@@ -44,10 +43,10 @@ Message your bot on Telegram. It responds. See [docs/DOCKER.md](docs/DOCKER.md) 
 ## How It Works
 
 ```
-You (Telegram) → grammY → Agent Loop → Claude + Tools → Reply
+You (Telegram) → grammY → Agent Loop → GPT-5.4 + Tools → Reply
 ```
 
-The agent loop calls Claude with conversation history and tools (`bash`, `read`, `write`, `edit`, `web_fetch`, `web_search`, `cron`, `memory_search`). Claude calls tools, results feed back — up to 25 main iterations per message, with timeout retries and graceful fallback if retries are exhausted. A heartbeat system checks in periodically, and a cron scheduler handles timed jobs.
+The agent loop calls GPT-5.4 (via the ChatGPT Codex backend) with conversation history and tools (`bash`, `read`, `write`, `edit`, `web_fetch`, `web_search`, `cron`, `memory_search`). The model calls tools, results feed back — up to 25 main iterations per message, with timeout retries and graceful fallback if retries are exhausted. A heartbeat system checks in periodically, and a cron scheduler handles timed jobs.
 
 Long-term memory is backed by a SQLite index with hybrid search (FTS5 keyword + optional OpenAI vector embeddings). `MEMORY.md` acts as semantic memory (durable facts/preferences), while `memory/YYYY-MM-DD.md` files capture episodic daily memory. Past conversation transcripts are also treated as episodic memory and indexed for recall. When context approaches the limit, the agent runs an out-of-band flush+compact helper: it asks the model to persist durable memory, then immediately compacts old messages via LLM summarization. Past conversations and memory files are searchable across sessions via the `memory_search` tool.
 
@@ -65,7 +64,6 @@ Skills are `SKILL.md` files with YAML frontmatter. Ask the agent to create new o
 | --------------------------------- | ----------------- | ---------------------------------------------------- |
 | `TELEGRAM_BOT_TOKEN`              | —                 | Telegram bot token (required)                        |
 | `TELEGRAM_CHAT_ID`                | —                 | Chat ID for cron/heartbeat output                    |
-| `ANTHROPIC_API_KEY`               | —                 | API key (alternative to OAuth login)                 |
 | `WORKSPACE_DIR`                   | `./workspace`     | Workspace root                                       |
 | `HEARTBEAT_INTERVAL_MINUTES`      | `30`              | Minutes between heartbeat checks                     |
 | `HEARTBEAT_ACTIVE_START` / `_END` | `08:00` / `23:00` | Active hours window                                  |
@@ -97,11 +95,11 @@ Run `make help` for the full list. Key targets:
 
 ```
 make dev            Run the bot
-make login          OAuth login (Claude Pro/Max)
-make login/key      API key login
+make login          OAuth login (ChatGPT Plus/Pro)
 make logout         Clear saved credentials
 make status         Show auth, workspace, skills info
 make test           Run all tests
+make test/integration  Run integration tests (requires auth)
 make lint           Run ESLint
 make fmt            Format code
 make docker/run     Build + run production container

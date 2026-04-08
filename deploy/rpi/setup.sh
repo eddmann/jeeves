@@ -111,21 +111,12 @@ while true; do
   error "Password cannot be empty"
 done
 
-# Auth method
-echo
-echo "  ${BOLD}? Auth method:${RESET}"
-echo "    1) API key"
-echo "    2) OAuth (auth.json)"
-read -rp "  ${BOLD}  Choose [1/2]:${RESET} " AUTH_CHOICE
+# Auth (OAuth via auth.json)
 echo
 
-AUTH_METHOD="apikey"
-API_KEY=""
 AUTH_JSON_PATH=""
 
-if [[ "$AUTH_CHOICE" == "2" ]]; then
-  AUTH_METHOD="oauth"
-
+{
   # Search for auth.json
   AUTH_JSON_FOUND=""
   for candidate in "$PROJECT_ROOT/auth.json" "./auth.json"; do
@@ -182,18 +173,7 @@ if [[ "$AUTH_CHOICE" == "2" ]]; then
   fi
 
   success "Using auth.json: $AUTH_JSON_PATH"
-
-else
-  # API key
-  while true; do
-    prompt_secret API_KEY "Anthropic API Key"
-    if [[ "$API_KEY" == sk-ant-* ]]; then
-      break
-    fi
-    error "API key should start with sk-ant-"
-  done
-  success "API key accepted"
-fi
+}
 
 # Tailscale
 echo
@@ -367,9 +347,6 @@ CLEANUP_FILES+=("$ENV_FILE")
 {
   echo "TELEGRAM_BOT_TOKEN=$BOT_TOKEN"
   echo "TELEGRAM_CHAT_ID=$CHAT_ID"
-  if [[ "$AUTH_METHOD" == "apikey" ]]; then
-    echo "ANTHROPIC_API_KEY=$API_KEY"
-  fi
   if [[ -n "$TS_AUTHKEY" ]]; then
     echo "TS_AUTHKEY=$TS_AUTHKEY"
   fi
@@ -414,10 +391,8 @@ COMPOSE_FILE=$(mktemp)
 CLEANUP_FILES+=("$COMPOSE_FILE")
 cp "$SCRIPT_DIR/docker-compose.yml" "$COMPOSE_FILE"
 
-if [[ "$AUTH_METHOD" == "oauth" ]]; then
-  sed -i.bak 's|# - ./auth.json:/app/auth.json|- ./auth.json:/app/auth.json|' "$COMPOSE_FILE"
-  rm -f "${COMPOSE_FILE}.bak"
-fi
+sed -i.bak 's|# - ./auth.json:/app/auth.json|- ./auth.json:/app/auth.json|' "$COMPOSE_FILE"
+rm -f "${COMPOSE_FILE}.bak"
 
 # Copy files
 sudo cp "$COMPOSE_FILE" "$BOOT_MOUNT/docker-compose.yml"
@@ -451,10 +426,8 @@ NETCONFIG
   success "Copied WiFi config"
 fi
 
-if [[ "$AUTH_METHOD" == "oauth" ]]; then
-  sudo cp "$AUTH_JSON_PATH" "$BOOT_MOUNT/auth.json"
-  success "Copied auth.json"
-fi
+sudo cp "$AUTH_JSON_PATH" "$BOOT_MOUNT/auth.json"
+success "Copied auth.json"
 
 # Eject
 echo

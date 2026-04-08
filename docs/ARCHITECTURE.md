@@ -1,6 +1,6 @@
 # Architecture
 
-Jeeves is a personal AI assistant that lives in Telegram. A user sends a message, the agent loop calls Claude with tools, and the reply comes back. Everything else — sessions, heartbeats, cron, skills — exists to support that core interaction.
+Jeeves is a personal AI assistant that lives in Telegram. A user sends a message, the agent loop calls GPT-5.4 (via the ChatGPT Codex backend) with tools, and the reply comes back. Everything else — sessions, heartbeats, cron, skills — exists to support that core interaction.
 
 ## Runtime and Build
 
@@ -57,7 +57,7 @@ Three triggers feed messages into the agent: Telegram messages from the user, th
 
 The `main()` function is the composition root. It:
 
-1. Parses CLI commands (`login`, `login --api-key`, `logout`, `status`)
+1. Parses CLI commands (`login`, `logout`, `status`)
 2. Initializes the workspace directory structure and loads `.env`
 3. Creates all shared dependencies: `AuthStorage`, `SessionStore`, `CronScheduler`, `MemoryIndex`, tools, the Telegram channel, and the `HeartbeatRunner`
 4. On startup, syncs memory index and indexes existing session files
@@ -72,10 +72,10 @@ The core of the system. Given a user message:
 1. **Load history** from `SessionStore` (JSONL on disk, keyed by chat ID)
 2. **Build system prompt** from current workspace files + skills
 3. **Tag user input with current UTC timestamp** and append to history
-4. **Call Claude** with timeout retries (up to 3 attempts total, linear backoff)
-5. **If Claude returns tool calls**, execute them and feed the results back — loop
+4. **Call GPT-5.4** with timeout retries (up to 3 attempts total, linear backoff)
+5. **If the model returns tool calls**, execute them and feed the results back — loop
 6. **When token usage crosses threshold**, run out-of-band `runFlushAndCompact()`
-7. **If Claude returns `end_turn`** or makes no tool calls, persist and return text
+7. **If the model returns `end_turn`** or makes no tool calls, persist and return text
 
 The loop caps at **25 main iterations**. On hitting the cap, it returns a fallback sentinel message.
 
@@ -94,20 +94,19 @@ interface AgentContext {
 }
 ```
 
-The optional `callLLM` field is the **dependency injection seam** — tests inject a stub that returns scripted responses instead of calling the Anthropic API. `memoryIndex` provides long-term memory search and is synced after compaction.
+The optional `callLLM` field is the **dependency injection seam** — tests inject a stub that returns scripted responses instead of calling the OpenAI API. `memoryIndex` provides long-term memory search and is synced after compaction.
 
 ## LLM Client (`src/llm.ts`)
 
-Wraps `@anthropic-ai/sdk` with streaming. Supports two auth modes:
+Raw HTTP client targeting the ChatGPT Codex backend (`chatgpt.com/backend-api/codex/responses`) with SSE streaming. Uses the OpenAI Responses API format, authenticated via OAuth PKCE tokens from a ChatGPT Plus/Pro subscription.
 
-- **API key mode**: straightforward `apiKey` on the Anthropic client
-- **OAuth stealth mode**: uses `authToken` with special headers and tool name remapping to look like Claude Code (required for OAuth tokens from Claude Pro/Max subscriptions)
-
-The stealth layer (`src/auth/stealth.ts`) handles:
-
-- Custom HTTP headers mimicking Claude Code's user-agent and beta flags
-- Tool name remapping: `bash` -> `Bash`, `read` -> `Read`, `web_fetch` -> `WebFetch`
-- A system prompt prefix identifying as Claude Code
+Key aspects:
+- **Message conversion**: Internal `LLMMessage` format converted to Responses API items (`input_text`, `output_text`, `function_call`, `function_call_output`)
+- **System prompt**: Sent as top-level `instructions` field in the payload
+- **Tools**: Converted to `{type: "function", name, description, parameters}` format
+- **Streaming**: SSE parsing of `data: {json}\n\n` lines, accumulating text deltas and tool call arguments
+- **Reasoning**: Suppressed via `reasoning: { effort: "none" }` for predictable responses
+- **Model**: `gpt-5.4` (272K standard context window, 128K max output)
 
 ## Tools
 
@@ -140,19 +139,15 @@ Tools always return strings (never throw to the agent) — errors are caught and
 
 ## Authentication (`src/auth/`)
 
-Dual-mode auth with priority order:
-
-1. **OAuth tokens** from `auth.json` (auto-refreshes when expired, with file locking)
-2. **API key** from `auth.json`
-3. **`ANTHROPIC_API_KEY`** environment variable (fallback)
+OAuth-based auth via `auth.json` (auto-refreshes when expired, with file locking).
 
 `AuthStorage` manages credentials:
 
-- Persists to `auth.json` with `0o600` permissions
+- Persists to `auth.json` with `0o600` permissions, including `accountId` extracted from JWT
 - OAuth token refresh uses `proper-lockfile` for safe concurrent access across processes
 - Refresh function is injectable via constructor for testing
 
-The OAuth PKCE flow (`src/auth/oauth.ts`) handles initial login against Anthropic's endpoints. The refresh function (`refreshAnthropicToken`) handles token renewal.
+The OAuth PKCE flow (`src/auth/oauth.ts`) handles initial login against OpenAI's auth endpoints (`auth.openai.com`). The refresh function (`refreshOpenAIToken`) handles token renewal. The `chatgpt_account_id` is extracted from the JWT access token and stored alongside the tokens.
 
 ## Sessions (`src/session.ts`)
 
@@ -180,9 +175,9 @@ Token-aware context management that prevents context window overflow while prese
 
 **Token estimation**: `ceil((chars / 4) * 1.2)` — a character-count heuristic with a 20% safety margin. Handles string messages, text blocks, `tool_use` (includes serialized input), and `tool_result` blocks.
 
-**Flush-and-compact trigger** relative to `CONTEXT_WINDOW` (200K tokens):
+**Flush-and-compact trigger** relative to `CONTEXT_WINDOW` (272K tokens):
 
-1. **Trigger** (~188K tokens): `shouldFlushAndCompact(totalTokens)` checks `CONTEXT_WINDOW - FLUSH_COMPACT_MARGIN`.
+1. **Trigger** (~256K tokens): `shouldFlushAndCompact(totalTokens)` checks `CONTEXT_WINDOW - FLUSH_COMPACT_MARGIN`.
 2. **Out-of-band flush run**: `runFlushAndCompact()` appends a pre-compaction flush prompt and runs a dedicated internal loop (up to `MAX_FLUSH_TURNS`, currently 8) where the model can call tools to persist durable memory.
 3. **Immediate compaction**: after the flush sub-loop ends, `compactAndSync()` runs summarization/pruning and writes a compaction marker.
 4. **Flush turn timeouts**: each flush LLM call uses the same retry policy; if retries are exhausted for a flush turn, the helper exits flush turns and compacts immediately.
@@ -191,7 +186,7 @@ Compaction internals:
 - Walk backward from the end, keeping recent messages up to 50% of context window
 - At least 1 message or half the history is always dropped
 - Orphaned `tool_result` blocks (whose matching `tool_use` was dropped) are repaired
-- Dropped messages are chunked and sent to `claude-sonnet-4-5-20250929` for summarization
+- Dropped messages are chunked and sent to `gpt-5.4` for summarization
 - If multiple chunks, a merge pass combines partial summaries
 - Fallback: if LLM fails, a stats-based summary is produced
 - A synthetic `[Previous conversation summary]` user message is prepended to the kept messages
@@ -417,11 +412,11 @@ Formats agent iteration progress for display in Telegram:
 3.  makeAgentContext() builds context with fresh skills + workspace files + memoryIndex
 4.  runAgent() loads session history from disk (post-last-compaction-marker)
 5.  System prompt assembled: base identity + skills + workspace files
-6.  Claude called with history + system prompt + tool definitions
-7.  Claude responds: tool_use[bash("curl wttr.in")]
+6.  GPT-5.4 called with history + system prompt + tool definitions
+7.  Model responds with function_call[bash("curl wttr.in")]
 8.  bash tool executes the command, returns stdout
-9.  Tool result appended to history, Claude called again
-10. Claude responds: end_turn["It's sunny and 72F"]
+9.  Tool result appended to history, model called again
+10. Model responds: end_turn["It's sunny and 72F"]
 11. [If context near limit: runFlushAndCompact() runs out-of-band flush turns]
 12. [Flush helper then compacts immediately: summarize + prune + re-index memory]
 13. Session history saved to disk
@@ -435,8 +430,6 @@ Formats agent iteration progress for display in Telegram:
 **Agent mutex over concurrency.** A single promise-based lock serializes all agent runs. This eliminates race conditions on sessions and workspace files at the cost of throughput. Acceptable for a personal assistant with one user.
 
 **JSONL for sessions and logs.** Append-friendly, human-readable, trivially parseable. Sessions are append-only during normal turns; compaction writes a marker plus compacted working history while preserving earlier lines.
-
-**Stealth mode for OAuth.** OAuth tokens from Claude Pro/Max require requests that look like they come from Claude Code. The stealth layer handles this transparently — the rest of the codebase doesn't know about it.
 
 **Tools always return strings.** No structured output, no exceptions reaching the agent. Errors are formatted as error messages. This keeps the agent loop simple and the LLM can reason about errors naturally.
 

@@ -47,7 +47,6 @@ export function buildLLMResponse(overrides?: Partial<LLMResponse>): LLMResponse 
     usage: overrides?.usage ?? {
       inputTokens: 100,
       outputTokens: 50,
-      cacheCreationInputTokens: 0,
       cacheReadInputTokens: 0,
     },
   };

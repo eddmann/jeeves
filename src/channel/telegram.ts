@@ -316,7 +316,7 @@ export function createTelegramChannel(opts: {
         ...(reply ? [{ type: "text" as const, text: reply }] : []),
         {
           type: "image",
-          source: { type: "base64", media_type: "image/jpeg", data: base64 },
+          dataUri: `data:image/jpeg;base64,${base64}`,
         },
         { type: "text", text: ctx.message.caption || "The user sent this image." },
       ];

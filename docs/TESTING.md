@@ -3,8 +3,9 @@
 ## Running Tests
 
 ```bash
-make test          # run all tests
-make test/watch    # watch mode
+make test              # run all unit tests
+make test/watch        # watch mode
+make test/integration  # integration tests (requires auth)
 ```
 
 The Makefile targets use the explicit `tests/` path. Running bare `bun test` will pick up foreign test files from `tmp/openclaw/` and crash.
@@ -15,7 +16,7 @@ We follow the **classical (Detroit) school** of testing. The unit under test is 
 
 **Test through the public API.** Tests interact with the system the same way callers would. We don't test private methods or assert on internal state.
 
-**Real objects over mocks.** We prefer stubs and fakes over mocks, and use test doubles only for true external boundaries: the Anthropic API, `globalThis.fetch`, the system clock, the filesystem (when we need to control it). Internal collaborators are never replaced with test doubles — if something is hard to test without mocking internals, that's a signal to reconsider the design.
+**Real objects over mocks.** We prefer stubs and fakes over mocks, and use test doubles only for true external boundaries: the OpenAI Codex API, `globalThis.fetch`, the system clock, the filesystem (when we need to control it). Internal collaborators are never replaced with test doubles — if something is hard to test without mocking internals, that's a signal to reconsider the design.
 
 **Focus on behaviors that matter.** We don't chase coverage metrics. Tests exist where they catch real bugs and document real behaviors. Thin glue code (like the grammY bot wiring in `createTelegramChannel`) is not tested because we'd be testing our mocks, not our code.
 
@@ -31,6 +32,7 @@ test("expired OAuth triggers refresh", async () => {
     accessToken: "expired",
     refreshToken: "rt",
     expiresAt: Date.now() + 1000,
+    accountId: "acc",
   });
 
   // Act
@@ -57,12 +59,11 @@ Tests are organized by **feature/behavior**, not by file structure:
 | `workspace.test.ts`          | Workspace files: loading, truncation, initialization, template seeding, .env loading                                                         |
 | `skills.test.ts`             | Skill discovery: loading, validation (name, description, directory match, format), overrides                                                 |
 | `telegram.test.ts`           | Pure functions: markdown-to-HTML conversion, message splitting, progress formatting, reply context                                           |
-| `stealth.test.ts`            | OAuth stealth: tool name remapping (both directions), headers, system prompt prefix                                                          |
 | `bash-tool.test.ts`          | Bash tool: command execution, exit codes, stderr, working directory, timeout                                                                 |
 | `read-file-tool.test.ts`     | Read tool: line numbering, path resolution, error handling                                                                                   |
 | `write-file-tool.test.ts`    | Write tool: content writing, directory creation, overwrite, error handling                                                                   |
 | `web-fetch-tool.test.ts`     | Web fetch: HTTP errors, HTML extraction, non-HTML passthrough, truncation, Readability fallback                                              |
-| `auth-storage.test.ts`       | Auth storage: credential CRUD, OAuth refresh (with DI), env var fallback, file permissions, logout                                           |
+| `auth-storage.test.ts`       | Auth storage: OAuth credential CRUD, token refresh (with DI), env var fallback, JWT validation, file permissions, logout                     |
 | `edit-file-tool.test.ts`     | Edit tool: find-and-replace, no-match handling, multi-occurrence                                                                             |
 | `web-search-tool.test.ts`    | Web search: query execution, result parsing, count limits, error handling                                                                    |
 | `memory-index.test.ts`       | MemoryIndex: memory file sync, session indexing (active/archived, compaction-marker-aware), chunking, stale cleanup, self-healing embeddings |
@@ -70,8 +71,11 @@ Tests are organized by **feature/behavior**, not by file structure:
 | `memory-search-tool.test.ts` | Memory search tool: query interface, result formatting                                                                                       |
 | `embeddings.test.ts`         | Embeddings: OpenAI API calls, batching, no-op embedder                                                                                       |
 | `compaction.test.ts`         | Compaction: token estimation, summarization, orphan repair, flush-and-compact threshold + flush prompt contract                              |
+| `attach-tool.test.ts`        | Attach tool: file attachment accumulation, confirmation messages                                                                              |
 | `agent-lock.test.ts`         | Agent mutex: serialization, timeout, lock release                                                                                            |
+| `media.test.ts`              | File type detection: image, voice, and audio format detection                                                                                |
 | `transcribe.test.ts`         | Transcription: Whisper API wrapper, file format handling                                                                                     |
+| `integration/llm.test.ts`    | End-to-end CLI integration: text responses, tool execution chains, session persistence, system prompt, skills                                |
 
 ## Test Doubles Used
 
@@ -79,7 +83,7 @@ We use precise terminology for test doubles (see table below). "Mock" is not a c
 
 | Double type | Where used                            | What it replaces                                                         |
 | ----------- | ------------------------------------- | ------------------------------------------------------------------------ |
-| **Stub**    | `AgentContext.callLLM`                | Anthropic API — returns scripted `LLMResponse` sequences                 |
+| **Stub**    | `AgentContext.callLLM`                | OpenAI Codex API — returns scripted `LLMResponse` sequences              |
 | **Stub**    | `globalThis.fetch` in web-fetch tests | Network calls — returns canned `Response` objects                        |
 | **Stub**    | `AuthStorage._refreshToken`           | OAuth token refresh endpoint — returns canned tokens or throws           |
 | **Stub**    | `HeartbeatRunner.runAgent`            | Agent execution — returns canned strings                                 |
@@ -88,7 +92,7 @@ We use precise terminology for test doubles (see table below). "Mock" is not a c
 | **Fake**    | `buildStubAuth()`                     | AuthStorage — in-memory credential store with no file I/O                |
 | **Real**    | Temp directories                      | Filesystem — tests create real files in `os.tmpdir()` and clean up after |
 
-We never mock types we don't own (grammY's `Bot`, Anthropic's `Anthropic` client, `croner`'s `Cron`). Where we need to isolate from external services, we inject our own abstractions and stub those.
+We never mock types we don't own (grammY's `Bot`, OpenAI's client, `croner`'s `Cron`). Where we need to isolate from external services, we inject our own abstractions and stub those.
 
 ## Dependency Injection Pattern
 
@@ -98,7 +102,7 @@ External dependencies are made injectable via optional constructor parameters or
 // Constructor parameter with default (AuthStorage)
 constructor(
   private authPath: string = join(process.cwd(), "auth.json"),
-  private _refreshToken: typeof refreshAnthropicToken = refreshAnthropicToken,
+  private _refreshToken: typeof refreshOpenAIToken = refreshOpenAIToken,
 )
 
 // Optional interface field with fallback (AgentContext)
@@ -141,22 +145,6 @@ afterEach(() => {
 
 Note: `setSystemTime` does **not** affect `setTimeout`/`setInterval` timing. We don't test timer-based behavior directly — instead we call methods like `runner.runOnce()` or `scheduler.runJob()` and assert on outcomes.
 
-### Environment Variable Isolation
-
-Tests that touch `process.env` save and restore values:
-
-```typescript
-let savedKey: string | undefined;
-beforeEach(() => {
-  savedKey = process.env.ANTHROPIC_API_KEY;
-  delete process.env.ANTHROPIC_API_KEY;
-});
-afterEach(() => {
-  if (savedKey !== undefined) process.env.ANTHROPIC_API_KEY = savedKey;
-  else delete process.env.ANTHROPIC_API_KEY;
-});
-```
-
 ### Factory Functions
 
 `tests/helpers/factories.ts` provides builders for common test objects:
@@ -176,17 +164,17 @@ These follow the **builder pattern** — provide sensible defaults so tests only
 
 ### `buildStubAuth()`
 
-`tests/helpers/stub-auth.ts` provides a minimal fake `AuthStorage` that returns canned credentials without touching the filesystem. Used in agent tests where auth isn't the behavior under test.
+`tests/helpers/stub-auth.ts` provides a minimal fake `AuthStorage` that returns canned OAuth credentials without touching the filesystem. Used in agent tests where auth isn't the behavior under test.
 
 ## What We Don't Test (and Why)
 
 **`createTelegramChannel`** — The grammY bot wiring is thin glue: construct a Bot, register handlers, start polling. Mocking grammY's `Bot` class would mean testing our mocks. The pure functions it uses (`markdownToTelegramHTML`, `splitMessage`, `formatProgress`) are tested thoroughly.
 
-**`callLLM`** — The Anthropic SDK wrapper makes real API calls with streaming. Testing it would require either hitting the real API (slow, flaky, costs money) or mocking the SDK deeply. Instead, we inject a stub `callLLM` into the agent loop and test the orchestration.
+**`callLLM`** — The Codex backend client makes real API calls with SSE streaming. Testing it would require either hitting the real API (slow, flaky, costs money) or mocking the SSE stream. Instead, we inject a stub `callLLM` into the agent loop and test the orchestration. The integration tests (`make test/integration`) exercise the real API end-to-end.
 
-**`loginAnthropic`** — The OAuth PKCE flow talks to Anthropic's auth endpoints. Can't be meaningfully tested without real credentials.
+**`loginOpenAI`** — The OAuth PKCE flow talks to OpenAI's auth endpoints. Can't be meaningfully tested without real credentials.
 
-**`src/index.ts` `main()`** — The composition root wires everything together. It's where all the real dependencies are assembled. Testing it would be an end-to-end test requiring Telegram tokens, Anthropic credentials, etc.
+**`src/index.ts` `main()`** — The composition root wires everything together. It's where all the real dependencies are assembled. Testing it would be an end-to-end test requiring Telegram tokens, OAuth credentials, etc. The CLI `chat` command is tested via integration tests.
 
 **Logger** — The logger is a no-op when `logDir` is null (its default state). In tests, it silently drops all writes. No test setup needed, no assertions on log output.
 

@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/eddmann/jeeves/main/deploy/server/s
 The script will:
 
 1. Check that Docker and Compose are installed
-2. Prompt for Telegram credentials and auth method (API key or OAuth)
+2. Prompt for Telegram credentials and OAuth auth.json
 3. Optionally configure Tailscale for SSH access
 4. Optionally configure an OpenAI API key for semantic memory search
 5. Generate all config files in `/opt/jeeves` (or your chosen directory)
@@ -37,9 +37,8 @@ mkdir -p /opt/jeeves && cd /opt/jeeves
 
 # Create .env from env.example
 cp env.example .env
-# Edit .env — set TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, ANTHROPIC_API_KEY
-
-# If using OAuth instead of API key:
+# Edit .env — set TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+# Copy your OAuth credentials:
 # cp /path/to/auth.json .
 
 # Create docker-compose.yml (see setup.sh for the full template)

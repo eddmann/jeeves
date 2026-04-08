@@ -6,17 +6,12 @@ import { readFileSync, statSync, writeFileSync } from "fs";
 import type { OAuthTokens } from "../src/auth/oauth";
 
 let tmpDir: string;
-let savedKey: string | undefined;
 
 beforeEach(() => {
   tmpDir = createTempDir();
-  savedKey = process.env.ANTHROPIC_API_KEY;
-  delete process.env.ANTHROPIC_API_KEY;
 });
 
 afterEach(() => {
-  if (savedKey !== undefined) process.env.ANTHROPIC_API_KEY = savedKey;
-  else delete process.env.ANTHROPIC_API_KEY;
   cleanupTempDir(tmpDir);
   setSystemTime();
 });
@@ -32,6 +27,7 @@ function stubRefresh(
     accessToken: tokens?.accessToken ?? "new-access",
     refreshToken: tokens?.refreshToken ?? "new-refresh",
     expiresAt: tokens?.expiresAt ?? Date.now() + 3600_000,
+    accountId: tokens?.accountId ?? "test-account-id",
   });
 }
 
@@ -55,13 +51,6 @@ describe("AuthStorage", () => {
     expect(await store.getCredential()).toBeNull();
   });
 
-  test("saves and loads API key", async () => {
-    const store = new AuthStorage(authPath());
-    await store.saveApiKey("sk-test-123");
-    const cred = await store.getCredential();
-    expect(cred).toEqual({ type: "api_key", key: "sk-test-123" });
-  });
-
   test("saves and loads OAuth tokens", async () => {
     const store = new AuthStorage(authPath(), stubRefresh());
     const future = Date.now() + 3600_000;
@@ -69,19 +58,25 @@ describe("AuthStorage", () => {
       accessToken: "access-tok",
       refreshToken: "refresh-tok",
       expiresAt: future,
+      accountId: "acc-123",
     });
     const cred = await store.getCredential();
     expect(cred).toEqual({
-      type: "oauth",
       accessToken: "access-tok",
       refreshToken: "refresh-tok",
       expiresAt: future,
+      accountId: "acc-123",
     });
   });
 
   test("file permissions set to 0o600", async () => {
     const store = new AuthStorage(authPath());
-    await store.saveApiKey("sk-secret");
+    await store.saveOAuth({
+      accessToken: "a",
+      refreshToken: "r",
+      expiresAt: Date.now() + 3600_000,
+      accountId: "acc",
+    });
     const mode = statSync(authPath()).mode & 0o777;
     expect(mode).toBe(0o600);
   });
@@ -90,46 +85,63 @@ describe("AuthStorage", () => {
     let refreshCalled = false;
     const refresh = async () => {
       refreshCalled = true;
-      return { accessToken: "x", refreshToken: "x", expiresAt: 0 };
+      return {
+        accessToken: "x",
+        refreshToken: "x",
+        expiresAt: 0,
+        accountId: "acc",
+      };
     };
     const store = new AuthStorage(authPath(), refresh);
     await store.saveOAuth({
       accessToken: "valid",
       refreshToken: "rt",
       expiresAt: Date.now() + 3600_000,
+      accountId: "acc",
     });
     const cred = await store.getCredential();
-    expect(cred?.type).toBe("oauth");
+    expect(cred?.accessToken).toBe("valid");
     expect(refreshCalled).toBe(false);
   });
 
   test("expired OAuth triggers refresh", async () => {
-    const store = new AuthStorage(authPath(), stubRefresh({ accessToken: "refreshed" }));
+    const store = new AuthStorage(
+      authPath(),
+      stubRefresh({ accessToken: "refreshed", accountId: "acc-new" }),
+    );
     await store.saveOAuth({
       accessToken: "expired",
       refreshToken: "rt",
       expiresAt: Date.now() + 1000,
+      accountId: "acc",
     });
     // Advance time past expiry
     setSystemTime(new Date(Date.now() + 2000));
     const cred = await store.getCredential();
-    expect(cred).toMatchObject({ type: "oauth", accessToken: "refreshed" });
+    expect(cred).toMatchObject({ accessToken: "refreshed" });
   });
 
   test("refresh persists new tokens to disk", async () => {
     const store = new AuthStorage(
       authPath(),
-      stubRefresh({ accessToken: "persisted", refreshToken: "new-rt", expiresAt: 9999999999999 }),
+      stubRefresh({
+        accessToken: "persisted",
+        refreshToken: "new-rt",
+        expiresAt: 9999999999999,
+        accountId: "acc-persisted",
+      }),
     );
     await store.saveOAuth({
       accessToken: "old",
       refreshToken: "rt",
       expiresAt: Date.now() + 1000,
+      accountId: "acc",
     });
     setSystemTime(new Date(Date.now() + 2000));
     await store.getCredential();
     const onDisk = JSON.parse(readFileSync(authPath(), "utf-8"));
     expect(onDisk.accessToken).toBe("persisted");
+    expect(onDisk.accountId).toBe("acc-persisted");
   });
 
   test("refresh failure returns null", async () => {
@@ -138,6 +150,7 @@ describe("AuthStorage", () => {
       accessToken: "old",
       refreshToken: "rt",
       expiresAt: Date.now() + 1000,
+      accountId: "acc",
     });
     setSystemTime(new Date(Date.now() + 2000));
     const cred = await store.getCredential();
@@ -151,28 +164,22 @@ describe("AuthStorage", () => {
       accessToken: "old",
       refreshToken: "rt",
       expiresAt: Date.now() + 1000,
+      accountId: "acc",
     });
     setSystemTime(new Date(Date.now() + 2000));
     // Simulate another process writing a fresh token before our refresh fails
     writeFileSync(
       path,
       JSON.stringify({
-        type: "oauth",
         accessToken: "from-other-process",
         refreshToken: "rt2",
         expiresAt: Date.now() + 3600_000,
+        accountId: "acc-other",
       }),
     );
     const cred = await store.getCredential();
     // Should have re-read the file and found a valid token
-    expect(cred).toMatchObject({ type: "oauth", accessToken: "from-other-process" });
-  });
-
-  test("falls back to ANTHROPIC_API_KEY env var", async () => {
-    process.env.ANTHROPIC_API_KEY = "env-key-123";
-    const store = new AuthStorage(authPath());
-    const cred = await store.getCredential();
-    expect(cred).toEqual({ type: "api_key", key: "env-key-123" });
+    expect(cred).toMatchObject({ accessToken: "from-other-process" });
   });
 
   test("returns null with no credential and no env", async () => {
@@ -182,7 +189,12 @@ describe("AuthStorage", () => {
 
   test("logout deletes file", async () => {
     const store = new AuthStorage(authPath());
-    await store.saveApiKey("key");
+    await store.saveOAuth({
+      accessToken: "a",
+      refreshToken: "r",
+      expiresAt: Date.now() + 3600_000,
+      accountId: "acc",
+    });
     store.logout();
     const { existsSync } = require("fs");
     expect(existsSync(authPath())).toBe(false);
@@ -193,29 +205,15 @@ describe("AuthStorage", () => {
     expect(() => store.logout()).not.toThrow();
   });
 
-  test("isOAuth returns correct boolean", async () => {
+  test("hasAuth true with credential", async () => {
     const store = new AuthStorage(authPath());
-    expect(store.isOAuth()).toBe(false);
-    await store.saveApiKey("key");
-    expect(store.isOAuth()).toBe(false);
+    expect(store.hasAuth()).toBe(false);
     await store.saveOAuth({
       accessToken: "a",
       refreshToken: "r",
       expiresAt: Date.now() + 3600_000,
+      accountId: "acc",
     });
-    expect(store.isOAuth()).toBe(true);
-  });
-
-  test("hasAuth true with credential", async () => {
-    const store = new AuthStorage(authPath());
-    expect(store.hasAuth()).toBe(false);
-    await store.saveApiKey("key");
-    expect(store.hasAuth()).toBe(true);
-  });
-
-  test("hasAuth true with env var only", () => {
-    process.env.ANTHROPIC_API_KEY = "env-key";
-    const store = new AuthStorage(authPath());
     expect(store.hasAuth()).toBe(true);
   });
 });

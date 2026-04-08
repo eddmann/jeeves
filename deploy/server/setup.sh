@@ -148,22 +148,12 @@ while true; do
   error "Chat ID must be a number (negative for group chats)"
 done
 
-# Auth method
-echo
-echo "  ${BOLD}? Auth method:${RESET}"
-echo "    1) API key"
-echo "    2) OAuth (auth.json)"
-read -rp "  ${BOLD}  Choose [1/2]:${RESET} " AUTH_CHOICE < /dev/tty
+# Auth (OAuth via auth.json)
 echo
 
-AUTH_METHOD="apikey"
-API_KEY=""
 AUTH_JSON_PATH=""
 
-if [[ "$AUTH_CHOICE" == "2" ]]; then
-  AUTH_METHOD="oauth"
-
-  # Search common locations
+{
   AUTH_JSON_FOUND=""
   for candidate in "./auth.json" "$HOME/auth.json"; do
     if [[ -f "$candidate" ]]; then
@@ -199,18 +189,7 @@ if [[ "$AUTH_CHOICE" == "2" ]]; then
   fi
 
   success "Using auth.json: $AUTH_JSON_PATH"
-
-else
-  # API key
-  while true; do
-    prompt_secret API_KEY "Anthropic API Key"
-    if [[ "$API_KEY" == sk-ant-* ]]; then
-      break
-    fi
-    error "API key should start with sk-ant-"
-  done
-  success "API key accepted"
-fi
+}
 
 # Tailscale
 echo
@@ -256,9 +235,6 @@ fi
 {
   echo "TELEGRAM_BOT_TOKEN=$BOT_TOKEN"
   echo "TELEGRAM_CHAT_ID=$CHAT_ID"
-  if [[ "$AUTH_METHOD" == "apikey" ]]; then
-    echo "ANTHROPIC_API_KEY=$API_KEY"
-  fi
   if [[ -n "$TS_AUTHKEY" ]]; then
     echo "TS_AUTHKEY=$TS_AUTHKEY"
   fi
@@ -269,12 +245,10 @@ fi
 chmod 600 "$INSTALL_DIR/.env"
 success "Generated .env"
 
-# Copy auth.json if OAuth
-if [[ "$AUTH_METHOD" == "oauth" ]]; then
-  cp "$AUTH_JSON_PATH" "$INSTALL_DIR/auth.json"
-  chmod 600 "$INSTALL_DIR/auth.json"
-  success "Copied auth.json"
-fi
+# Copy auth.json
+cp "$AUTH_JSON_PATH" "$INSTALL_DIR/auth.json"
+chmod 600 "$INSTALL_DIR/auth.json"
+success "Copied auth.json"
 
 # Generate docker-compose.yml
 cat > "$INSTALL_DIR/docker-compose.yml" <<'COMPOSE_EOF'
@@ -290,12 +264,10 @@ services:
       - tailscale-state:/var/lib/tailscale
 COMPOSE_EOF
 
-# Add auth.json mount if OAuth
-if [[ "$AUTH_METHOD" == "oauth" ]]; then
-  sed -i.bak '/- workspace:\/app\/workspace/a\
-      - ./auth.json:/app/auth.json' "$INSTALL_DIR/docker-compose.yml"
-  rm -f "$INSTALL_DIR/docker-compose.yml.bak"
-fi
+# Add auth.json mount
+sed -i.bak '/- workspace:\/app\/workspace/a\
+    - ./auth.json:/app/auth.json' "$INSTALL_DIR/docker-compose.yml"
+rm -f "$INSTALL_DIR/docker-compose.yml.bak"
 
 cat >> "$INSTALL_DIR/docker-compose.yml" <<'COMPOSE_EOF'
 

@@ -1,24 +1,20 @@
 /**
  * Credential persistence and resolution.
- * Supports API key and OAuth credentials with file-locked token refresh.
+ * Supports OAuth credentials with file-locked token refresh.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, unlinkSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
-import { refreshAnthropicToken, type OAuthTokens } from "./oauth";
+import { refreshOpenAIToken, type OAuthTokens } from "./oauth";
 import { log, formatError } from "../logger";
 
-export type AuthCredential =
-  | { type: "api_key"; key: string }
-  | { type: "oauth"; accessToken: string; refreshToken: string; expiresAt: number };
-
 export class AuthStorage {
-  private credential: AuthCredential | null = null;
+  private credential: OAuthTokens | null = null;
 
   constructor(
     private authPath: string = join(process.cwd(), "auth.json"),
-    private _refreshToken: typeof refreshAnthropicToken = refreshAnthropicToken,
+    private _refreshToken: typeof refreshOpenAIToken = refreshOpenAIToken,
   ) {
     this.reload();
   }
@@ -29,7 +25,12 @@ export class AuthStorage {
       return;
     }
     try {
-      this.credential = JSON.parse(readFileSync(this.authPath, "utf-8"));
+      const data = JSON.parse(readFileSync(this.authPath, "utf-8"));
+      if (data?.accessToken && data.accountId) {
+        this.credential = data;
+      } else {
+        this.credential = null;
+      }
     } catch {
       this.credential = null;
     }
@@ -44,45 +45,18 @@ export class AuthStorage {
     chmodSync(this.authPath, 0o600);
   }
 
-  /**
-   * Get the current credential, with auto-refresh for expired OAuth tokens.
-   * Priority: 1) OAuth from auth.json (auto-refresh) -> 2) API key from auth.json -> 3) ANTHROPIC_API_KEY env
-   */
-  async getCredential(): Promise<AuthCredential | null> {
-    // Check auth.json first
+  /** Get the current credential, with auto-refresh for expired tokens. */
+  async getCredential(): Promise<OAuthTokens | null> {
     if (this.credential) {
-      if (this.credential.type === "api_key") {
+      if (Date.now() < this.credential.expiresAt) {
         return this.credential;
       }
-      if (this.credential.type === "oauth") {
-        if (Date.now() < this.credential.expiresAt) {
-          return this.credential;
-        }
-        // Token expired, try refresh with file lock
-        return await this.refreshWithLock();
-      }
+      return await this.refreshWithLock();
     }
-
-    // Fall back to environment variable
-    const envKey = process.env.ANTHROPIC_API_KEY;
-    if (envKey) {
-      return { type: "api_key", key: envKey };
-    }
-
     return null;
   }
 
-  private async refreshWithLock(): Promise<AuthCredential | null> {
-    // Ensure auth file exists for locking
-    if (!existsSync(this.authPath)) {
-      const dir = dirname(this.authPath);
-      if (!existsSync(dir)) {
-        mkdirSync(dir, { recursive: true, mode: 0o700 });
-      }
-      writeFileSync(this.authPath, "{}", "utf-8");
-      chmodSync(this.authPath, 0o600);
-    }
-
+  private async refreshWithLock(): Promise<OAuthTokens | null> {
     let release: (() => Promise<void>) | undefined;
 
     try {
@@ -100,7 +74,7 @@ export class AuthStorage {
       // Re-read after acquiring lock (another process may have refreshed)
       this.reload();
 
-      if (!this.credential || this.credential.type !== "oauth") {
+      if (!this.credential) {
         return this.credential;
       }
 
@@ -110,19 +84,13 @@ export class AuthStorage {
       }
 
       // Refresh the token
-      const tokens = await this._refreshToken(this.credential.refreshToken);
-      this.credential = {
-        type: "oauth",
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        expiresAt: tokens.expiresAt,
-      };
+      this.credential = await this._refreshToken(this.credential.refreshToken);
       this.save();
       return this.credential;
     } catch (err) {
       // Refresh failed — re-read to check if another instance succeeded
       this.reload();
-      if (this.credential?.type === "oauth" && Date.now() < this.credential.expiresAt) {
+      if (this.credential && Date.now() < this.credential.expiresAt) {
         return this.credential;
       }
       log.error("auth", "OAuth token refresh failed", formatError(err));
@@ -139,33 +107,18 @@ export class AuthStorage {
   }
 
   async saveOAuth(tokens: OAuthTokens): Promise<void> {
-    this.credential = {
-      type: "oauth",
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
-      expiresAt: tokens.expiresAt,
-    };
-    this.save();
-  }
-
-  async saveApiKey(key: string): Promise<void> {
-    this.credential = { type: "api_key", key };
+    this.credential = tokens;
     this.save();
   }
 
   logout(): void {
     if (existsSync(this.authPath)) {
-      const { unlinkSync } = require("fs");
       unlinkSync(this.authPath);
     }
     this.credential = null;
   }
 
-  isOAuth(): boolean {
-    return this.credential?.type === "oauth";
-  }
-
   hasAuth(): boolean {
-    return this.credential !== null || !!process.env.ANTHROPIC_API_KEY;
+    return this.credential !== null;
   }
 }

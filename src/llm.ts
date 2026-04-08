@@ -1,16 +1,9 @@
 /**
- * LLM client wrapping @anthropic-ai/sdk.
- * Supports API key and OAuth (stealth) modes.
+ * LLM client — raw HTTP + SSE to the ChatGPT Codex backend.
+ * Uses the Responses API at chatgpt.com/backend-api/codex/responses.
  */
 
-import Anthropic, { type ClientOptions } from "@anthropic-ai/sdk";
 import type { AuthStorage } from "./auth/storage";
-import {
-  getStealthHeaders,
-  getStealthSystemPrefix,
-  toClaudeCodeToolName,
-  fromClaudeCodeToolName,
-} from "./auth/stealth";
 import { log, formatError } from "./logger";
 
 export interface LLMMessage {
@@ -20,21 +13,14 @@ export interface LLMMessage {
 
 export type LLMContentBlock =
   | { type: "text"; text: string }
-  | {
-      type: "image";
-      source: {
-        type: "base64";
-        media_type: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
-        data: string;
-      };
-    }
+  | { type: "image"; dataUri: string }
   | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
   | { type: "tool_result"; tool_use_id: string; content: string };
 
 export interface LLMTool {
   name: string;
   description: string;
-  input_schema: Record<string, unknown>;
+  parameters: Record<string, unknown>;
 }
 
 export interface LLMResponse {
@@ -44,7 +30,6 @@ export interface LLMResponse {
   usage: {
     inputTokens: number;
     outputTokens: number;
-    cacheCreationInputTokens: number;
     cacheReadInputTokens: number;
   };
 }
@@ -56,6 +41,226 @@ export class LLMTimeoutError extends Error {
   }
 }
 
+const CODEX_BASE_URL = "https://chatgpt.com/backend-api";
+const CODEX_RESPONSES_PATH = "/codex/responses";
+const DEFAULT_MODEL = "gpt-5.4";
+
+/** Convert internal LLMTool to Responses API function format. */
+function convertTools(tools: LLMTool[]): Array<Record<string, unknown>> {
+  return tools.map((t) => ({
+    type: "function",
+    name: t.name,
+    description: t.description,
+    parameters: t.parameters,
+  }));
+}
+
+/** Convert internal LLMMessage[] to Responses API input items. */
+function convertMessages(messages: LLMMessage[]): Array<Record<string, unknown>> {
+  const output: Array<Record<string, unknown>> = [];
+  let msgIndex = 0;
+
+  for (const msg of messages) {
+    if (typeof msg.content === "string") {
+      if (msg.role === "user") {
+        output.push({
+          role: "user",
+          content: [{ type: "input_text", text: msg.content }],
+        });
+      } else {
+        output.push({
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: msg.content, annotations: [] }],
+          status: "completed",
+          id: `msg_${msgIndex}`,
+        });
+      }
+      msgIndex++;
+      continue;
+    }
+
+    // Content block array
+    if (msg.role === "user") {
+      const contentItems: Array<Record<string, unknown>> = [];
+      for (const block of msg.content) {
+        if (block.type === "text") {
+          contentItems.push({ type: "input_text", text: block.text });
+        } else if (block.type === "image") {
+          contentItems.push({ type: "input_image", image_url: block.dataUri });
+        } else if (block.type === "tool_result") {
+          // Tool results are top-level items, not nested in user content
+          if (contentItems.length > 0) {
+            output.push({ role: "user", content: contentItems.splice(0) });
+          }
+          output.push({
+            type: "function_call_output",
+            call_id: block.tool_use_id,
+            output: block.content,
+          });
+        }
+      }
+      if (contentItems.length > 0) {
+        output.push({ role: "user", content: contentItems });
+      }
+    } else {
+      // Assistant message with content blocks
+      for (const block of msg.content) {
+        if (block.type === "text") {
+          output.push({
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: block.text, annotations: [] }],
+            status: "completed",
+            id: `msg_${msgIndex}`,
+          });
+        } else if (block.type === "tool_use") {
+          output.push({
+            type: "function_call",
+            call_id: block.id,
+            name: block.name,
+            arguments: JSON.stringify(block.input),
+          });
+        }
+      }
+    }
+
+    msgIndex++;
+  }
+
+  return output;
+}
+
+/** Parse SSE stream and extract text, tool calls, and usage. */
+async function parseSSEStream(response: Response): Promise<{
+  text: string;
+  toolCalls: LLMResponse["toolCalls"];
+  stopReason: string;
+  usage: LLMResponse["usage"];
+}> {
+  let text = "";
+  const toolCallMap = new Map<number, { callId: string; name: string; argsJson: string }>();
+  let currentToolIndex = -1;
+  let stopReason = "end_turn";
+  const usage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadInputTokens: 0,
+  };
+
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const dataStr = line.slice(6);
+      if (dataStr === "[DONE]") break;
+
+      let event: Record<string, unknown>;
+      try {
+        event = JSON.parse(dataStr);
+      } catch {
+        continue;
+      }
+
+      const eventType = event.type as string | undefined;
+      if (!eventType) continue;
+
+      if (eventType === "response.output_item.added") {
+        const item = (event.item as Record<string, unknown>) ?? {};
+        if (item.type === "function_call") {
+          currentToolIndex++;
+          toolCallMap.set(currentToolIndex, {
+            callId: (item.call_id as string) ?? "",
+            name: (item.name as string) ?? "",
+            argsJson: (item.arguments as string) ?? "",
+          });
+        }
+      } else if (eventType === "response.output_text.delta") {
+        const delta = (event.delta as string) ?? "";
+        if (delta) text += delta;
+      } else if (eventType === "response.function_call_arguments.delta") {
+        const delta = (event.delta as string) ?? "";
+        const tc = toolCallMap.get(currentToolIndex);
+        if (tc && delta) tc.argsJson += delta;
+      } else if (eventType === "response.function_call_arguments.done") {
+        const tc = toolCallMap.get(currentToolIndex);
+        if (tc) {
+          tc.argsJson = (event.arguments as string) ?? tc.argsJson;
+        }
+      } else if (eventType === "response.output_item.done") {
+        const item = (event.item as Record<string, unknown>) ?? {};
+        if (item.type === "message") {
+          // Finalize text from completed item
+          const content = item.content as Array<Record<string, unknown>> | undefined;
+          if (content) {
+            const fullText = content
+              .map((part) => (part.text as string) ?? (part.refusal as string) ?? "")
+              .join("");
+            if (fullText) text = fullText;
+          }
+        } else if (item.type === "function_call") {
+          const tc = toolCallMap.get(currentToolIndex);
+          if (tc) {
+            const argsStr = (item.arguments as string) ?? tc.argsJson;
+            tc.argsJson = argsStr;
+          }
+        }
+      } else if (eventType === "response.completed") {
+        const resp = (event.response as Record<string, unknown>) ?? {};
+        const usageData = (resp.usage ?? event.usage) as Record<string, unknown> | undefined;
+
+        if (usageData) {
+          const inputDetails = usageData.input_tokens_details as
+            | Record<string, unknown>
+            | undefined;
+          const cachedTokens = (inputDetails?.cached_tokens as number) ?? 0;
+          const totalInput = (usageData.input_tokens as number) ?? 0;
+          usage.inputTokens = Math.max(totalInput - cachedTokens, 0);
+          usage.outputTokens = (usageData.output_tokens as number) ?? 0;
+          usage.cacheReadInputTokens = Math.max(cachedTokens, 0);
+        }
+
+        const status = resp.status as string | undefined;
+        if (status === "completed") {
+          stopReason = toolCallMap.size > 0 ? "tool_use" : "end_turn";
+        } else if (status === "incomplete") {
+          stopReason = "length";
+        } else {
+          stopReason = "end_turn";
+        }
+      } else if (eventType === "response.failed" || eventType === "error") {
+        const err = (event.error as Record<string, unknown>) ?? {};
+        const message = (err.message as string) ?? String(err) ?? "Request failed";
+        throw new Error(`Codex API error: ${message}`);
+      }
+    }
+  }
+
+  // Finalize tool calls
+  const toolCalls: LLMResponse["toolCalls"] = [];
+  for (const [, tc] of toolCallMap) {
+    let input: Record<string, unknown> = {};
+    try {
+      input = tc.argsJson ? JSON.parse(tc.argsJson) : {};
+    } catch {
+      input = {};
+    }
+    toolCalls.push({ id: tc.callId, name: tc.name, input });
+  }
+
+  return { text, toolCalls, stopReason, usage };
+}
+
 export async function callLLM(opts: {
   messages: LLMMessage[];
   tools: LLMTool[];
@@ -63,164 +268,88 @@ export async function callLLM(opts: {
   authStorage: AuthStorage;
   model?: string;
 }): Promise<LLMResponse> {
-  const model = opts.model ?? "claude-opus-4-6";
+  const model = opts.model ?? DEFAULT_MODEL;
   const credential = await opts.authStorage.getCredential();
   if (!credential) {
-    throw new Error("No authentication configured. Run `jeeves login` or set ANTHROPIC_API_KEY.");
+    throw new Error("No authentication configured. Run `jeeves login` to authenticate.");
   }
 
-  const isOAuth = credential.type === "oauth";
+  // Build payload
+  const input = convertMessages(opts.messages);
+  const tools = convertTools(opts.tools);
 
-  const clientOpts: ClientOptions = {
-    maxRetries: 5,
-    logLevel: log.level,
-    logger: {
-      error: (msg: string, ...args: unknown[]) =>
-        log.error("sdk", msg, args[0] as Record<string, unknown>),
-      warn: (msg: string, ...args: unknown[]) =>
-        log.warn("sdk", msg, args[0] as Record<string, unknown>),
-      info: (msg: string, ...args: unknown[]) =>
-        log.info("sdk", msg, args[0] as Record<string, unknown>),
-      debug: (msg: string, ...args: unknown[]) =>
-        log.debug("sdk", msg, args[0] as Record<string, unknown>),
-    },
+  const payload: Record<string, unknown> = {
+    model,
+    instructions: opts.systemPrompt || "You are a helpful assistant.",
+    input,
+    store: false,
+    stream: true,
+    reasoning: { effort: "none" }, // disable CoT — latency/cost, tool-use loop handles planning
   };
-  if (isOAuth) {
-    clientOpts.apiKey = null;
-    clientOpts.authToken = credential.accessToken;
-    clientOpts.defaultHeaders = getStealthHeaders();
-    clientOpts.dangerouslyAllowBrowser = true;
-  } else {
-    clientOpts.apiKey = credential.key;
-  }
 
-  const client = new Anthropic(clientOpts);
-
-  // Build system prompt with cache_control on the last block
-  const systemBlocks: Anthropic.TextBlockParam[] = [];
-  if (isOAuth) {
-    systemBlocks.push({ type: "text", text: getStealthSystemPrefix() });
-  }
-  if (opts.systemPrompt) {
-    systemBlocks.push({ type: "text", text: opts.systemPrompt });
-  }
-  if (systemBlocks.length > 0) {
-    systemBlocks[systemBlocks.length - 1].cache_control = { type: "ephemeral" };
-  }
-
-  // Remap tool names for OAuth mode, cache_control on last tool
-  const tools: Anthropic.Tool[] = opts.tools.map((t) => ({
-    name: isOAuth ? toClaudeCodeToolName(t.name) : t.name,
-    description: t.description,
-    input_schema: t.input_schema as Anthropic.Tool.InputSchema,
-  }));
   if (tools.length > 0) {
-    tools[tools.length - 1].cache_control = { type: "ephemeral" };
+    payload.tools = tools;
   }
 
-  // Convert messages
-  const messages: Anthropic.MessageParam[] = opts.messages.map((m) => {
-    if (typeof m.content === "string") {
-      return { role: m.role, content: m.content };
-    }
-    return {
-      role: m.role,
-      content: m.content.map((block): Anthropic.ContentBlockParam => {
-        if (block.type === "tool_use" && isOAuth) {
-          return { ...block, name: toClaudeCodeToolName(block.name) };
-        }
-        return block;
-      }),
-    };
-  });
-
-  // Add cache_control on the last message's last content block.
-  // Without this, the 20-block lookback window can't reach the system/tools
-  // cache breakpoints when conversations grow beyond ~20 messages.
-  // First strip any stale markers from prior callLLM iterations (the history
-  // array is mutated in place by the agent loop), then set the new one.
-  for (const m of messages) {
-    if (Array.isArray(m.content)) {
-      for (const block of m.content) {
-        if (block.cache_control) block.cache_control = undefined;
-      }
-    }
-  }
-  if (messages.length > 0) {
-    const last = messages[messages.length - 1];
-    if (typeof last.content === "string") {
-      last.content = [{ type: "text", text: last.content, cache_control: { type: "ephemeral" } }];
-    } else if (Array.isArray(last.content) && last.content.length > 0) {
-      last.content[last.content.length - 1].cache_control = { type: "ephemeral" };
-    }
-  }
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${credential.accessToken}`,
+    "Content-Type": "application/json",
+    "chatgpt-account-id": credential.accountId,
+    "OpenAI-Beta": "responses=experimental",
+    originator: "agent",
+  };
 
   log.info("llm", "Request", {
     model,
     messages: opts.messages.length,
     tools: tools.length,
-    isOAuth,
   });
 
   const llmStart = Date.now();
   const LLM_TIMEOUT_MS = 2 * 60 * 1000;
+  const url = `${CODEX_BASE_URL}${CODEX_RESPONSES_PATH}`;
 
-  // Use streaming (required for OAuth/Claude Code compatibility)
-  const stream = client.messages.stream({
-    model,
-    max_tokens: 8192,
-    system: systemBlocks,
-    messages,
-    tools,
-    stream: true,
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
 
-  let response: Anthropic.Message;
+  let result: Awaited<ReturnType<typeof parseSSEStream>>;
   try {
-    const timeout = new Promise<never>((_, rej) =>
-      setTimeout(() => rej(new LLMTimeoutError()), LLM_TIMEOUT_MS),
-    );
-    response = await Promise.race([stream.finalMessage(), timeout]);
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`Codex API HTTP ${response.status}: ${errorBody}`);
+    }
+
+    result = await parseSSEStream(response);
   } catch (err) {
-    stream.abort();
+    if (err instanceof DOMException && err.name === "AbortError") {
+      log.error("llm", "API timeout", { ms: Date.now() - llmStart });
+      throw new LLMTimeoutError();
+    }
     log.error("llm", "API error", { ms: Date.now() - llmStart, ...formatError(err) });
     throw err;
-  }
-
-  // Extract text and tool calls
-  let text = "";
-  const toolCalls: LLMResponse["toolCalls"] = [];
-
-  for (const block of response.content) {
-    if (block.type === "text") {
-      text += block.text;
-    } else if (block.type === "tool_use") {
-      const originalName = isOAuth ? fromClaudeCodeToolName(block.name, opts.tools) : block.name;
-      toolCalls.push({
-        id: block.id,
-        name: originalName,
-        input: block.input as Record<string, unknown>,
-      });
-    }
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   log.info("llm", "Response", {
-    stopReason: response.stop_reason ?? "end_turn",
-    textChars: text.length,
-    toolCalls: toolCalls.length,
+    stopReason: result.stopReason,
+    textChars: result.text.length,
+    toolCalls: result.toolCalls.length,
     ms: Date.now() - llmStart,
-    usage: response.usage,
+    usage: result.usage,
   });
 
   return {
-    text,
-    toolCalls,
-    stopReason: response.stop_reason ?? "end_turn",
-    usage: {
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
-      cacheCreationInputTokens: response.usage.cache_creation_input_tokens ?? 0,
-      cacheReadInputTokens: response.usage.cache_read_input_tokens ?? 0,
-    },
+    text: result.text,
+    toolCalls: result.toolCalls,
+    stopReason: result.stopReason,
+    usage: result.usage,
   };
 }

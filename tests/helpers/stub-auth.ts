@@ -1,12 +1,12 @@
-export function buildStubAuth(opts?: { isOAuth?: boolean; key?: string }) {
-  const isOAuth = opts?.isOAuth ?? false;
+export function buildStubAuth() {
   return {
-    isOAuth: () => isOAuth,
     async getCredential() {
-      if (isOAuth) {
-        return { type: "oauth" as const, accessToken: "test-token" };
-      }
-      return { type: "api_key" as const, key: opts?.key ?? "test-key" };
+      return {
+        accessToken: "test-token",
+        refreshToken: "test-refresh",
+        expiresAt: Date.now() + 3600_000,
+        accountId: "test-account-id",
+      };
     },
   };
 }

@@ -54,7 +54,7 @@ describe("estimateMessageTokens", () => {
       content: [
         {
           type: "image",
-          source: { type: "base64", media_type: "image/jpeg", data: "abc" },
+          dataUri: "data:image/jpeg;base64,abc",
         } as LLMContentBlock,
       ],
     };

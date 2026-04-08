@@ -19,7 +19,7 @@ Run the setup script to flash and configure the SD card in one step:
 
     bash setup.sh
 
-It will prompt for your Telegram and Anthropic credentials, optionally configure Tailscale and an OpenAI API key for semantic memory search, detect your SD card, flash Raspberry Pi OS, and copy all deployment files. Then just insert and boot.
+It will prompt for your Telegram credentials and OAuth auth.json, optionally configure Tailscale and an OpenAI API key for semantic memory search, detect your SD card, flash Raspberry Pi OS, and copy all deployment files. Then just insert and boot.
 
 To do it manually instead, follow the steps below.
 
@@ -33,14 +33,7 @@ Open Raspberry Pi Imager and flash **Raspberry Pi OS Lite (64-bit)**. In the set
 
 ### 2. Configure auth
 
-**API key (simple):** Copy `env.example` to `env` and fill in your tokens:
-
-```bash
-cp env.example env
-# edit env — set TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, ANTHROPIC_API_KEY
-```
-
-**OAuth (Claude Pro/Max):** Run `make login` on your laptop to generate `auth.json`, then copy it here. Your `env` file only needs `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
+Run `make login` on your laptop to generate `auth.json` (OAuth via ChatGPT Plus/Pro), then copy it here. Copy `env.example` to `env` and fill in `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
 
 ### 3. Copy files to boot partition
 

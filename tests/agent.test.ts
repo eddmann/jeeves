@@ -463,7 +463,7 @@ describe("agent loop", () => {
     const highCacheUsage = {
       inputTokens: 10,
       outputTokens: 50,
-      cacheCreationInputTokens: 0,
+
       cacheReadInputTokens: overThreshold,
     };
 
@@ -520,7 +520,7 @@ describe("agent loop", () => {
           usage: {
             inputTokens: 100,
             outputTokens: 50,
-            cacheCreationInputTokens: 0,
+
             cacheReadInputTokens: 50_000,
           },
         });
@@ -582,7 +582,7 @@ describe("agent loop", () => {
     const flushUsage = {
       inputTokens: flushZoneTokens,
       outputTokens: 50,
-      cacheCreationInputTokens: 0,
+
       cacheReadInputTokens: 0,
     };
 
@@ -644,7 +644,7 @@ describe("agent loop", () => {
     const flushUsage = {
       inputTokens: flushZoneTokens,
       outputTokens: 50,
-      cacheCreationInputTokens: 0,
+
       cacheReadInputTokens: 0,
     };
 
@@ -720,7 +720,7 @@ describe("agent loop", () => {
     const content: LLMContentBlock[] = [
       {
         type: "image",
-        source: { type: "base64", media_type: "image/jpeg", data: "abc123" },
+        dataUri: "data:image/jpeg;base64,abc123",
       },
       { type: "text", text: "What is this?" },
     ];
@@ -748,7 +748,7 @@ describe("agent loop", () => {
     const content: LLMContentBlock[] = [
       {
         type: "image",
-        source: { type: "base64", media_type: "image/jpeg", data: "huge-base64-data" },
+        dataUri: "data:image/jpeg;base64,huge-base64-data",
       },
       { type: "text", text: "describe this" },
     ];
@@ -839,7 +839,7 @@ describe("agent loop", () => {
             usage: {
               inputTokens: flushZoneTokens,
               outputTokens: 50,
-              cacheCreationInputTokens: 0,
+
               cacheReadInputTokens: 0,
             },
           });
@@ -867,7 +867,7 @@ describe("sanitizeForPersist", () => {
         content: [
           {
             type: "image",
-            source: { type: "base64", media_type: "image/jpeg", data: "abc" },
+            dataUri: "data:image/jpeg;base64,abc",
           },
           { type: "text", text: "caption" },
         ],

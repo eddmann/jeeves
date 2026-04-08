@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Personal AI assistant living in Telegram — powered by Claude",
+  "description": "Personal AI assistant living in Telegram — powered by OpenAI",
   "author": "Edd Mann <the@eddmann.com>",
   "license": "MIT",
   "repository": {
@@ -24,7 +24,6 @@
     "format:check": "prettier --check 'src/**/*.ts' 'tests/**/*.ts'"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.72.1",
     "@grammyjs/runner": "^2.0.3",
     "@mozilla/readability": "^0.6.0",
     "croner": "^9.1.0",

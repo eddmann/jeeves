@@ -5,7 +5,7 @@
 import { join, resolve } from "path";
 import { createInterface } from "readline";
 import { AuthStorage } from "./auth/storage";
-import { loginAnthropic } from "./auth/oauth";
+import { loginOpenAI } from "./auth/oauth";
 import { loadWorkspaceFiles, initWorkspace, loadWorkspaceEnv } from "./workspace/loader";
 import { loadSkillsFromDirs } from "./skills/loader";
 import { allTools } from "./tools/index";
@@ -33,22 +33,9 @@ async function main() {
 
   // CLI commands
   if (command === "login") {
-    if (args.includes("--api-key")) {
-      const rl = createInterface({ input: process.stdin, output: process.stdout });
-      const key = await new Promise<string>((res) => {
-        rl.question("Enter your Anthropic API key: ", (answer) => {
-          rl.close();
-          res(answer.trim());
-        });
-      });
-      await authStorage.saveApiKey(key);
-      console.log("API key saved to auth.json");
-      return;
-    }
-
     // OAuth PKCE flow
     console.log("Starting OAuth login...");
-    const tokens = await loginAnthropic(
+    const tokens = await loginOpenAI(
       (url) => {
         console.log("\nOpen this URL in your browser:\n");
         console.log(url);
@@ -57,7 +44,7 @@ async function main() {
       async () => {
         const rl = createInterface({ input: process.stdin, output: process.stdout });
         return new Promise<string>((res) => {
-          rl.question("Paste the authorization code: ", (answer) => {
+          rl.question("Paste the redirect URL or authorization code: ", (answer) => {
             rl.close();
             res(answer.trim());
           });
@@ -77,27 +64,78 @@ async function main() {
 
   if (command === "status") {
     const hasAuth = authStorage.hasAuth();
-    const isOAuth = authStorage.isOAuth();
     const skillDirs = [join(rootDir, "skills"), join(workspaceDir, "skills")];
     const skills = loadSkillsFromDirs(skillDirs);
     const hasTelegram = !!process.env.TELEGRAM_BOT_TOKEN;
 
     console.log("Jeeves Status");
     console.log("─".repeat(40));
-    console.log(`Auth:      ${hasAuth ? (isOAuth ? "OAuth" : "API Key") : "Not configured"}`);
+    console.log(`Auth:      ${hasAuth ? "OAuth" : "Not configured"}`);
     console.log(`Workspace: ${workspaceDir}`);
     console.log(`Skills:    ${skills.length} loaded`);
     console.log(`Telegram:  ${hasTelegram ? "Configured" : "Not configured"}`);
     return;
   }
 
+  // CLI chat mode: `bun dev chat "your message here"`
+  if (command === "chat") {
+    const message = args.slice(1).join(" ");
+    if (!message) {
+      console.error("Usage: bun dev chat <message>");
+      process.exit(1);
+    }
+    if (!authStorage.hasAuth()) {
+      console.error("No authentication configured. Run `bun dev login` first.");
+      process.exit(1);
+    }
+
+    const logLevel = (process.env.LOG_LEVEL ?? "info") as "debug" | "info" | "warn" | "error";
+    const logDir = join(workspaceDir, "logs");
+    initLogger(logLevel, logDir);
+
+    const templateDir = join(rootDir, "src", "workspace", "templates");
+    initWorkspace(workspaceDir, templateDir);
+    loadWorkspaceEnv(workspaceDir);
+
+    const skillDirs = [join(rootDir, "skills"), join(workspaceDir, "skills")];
+    const sessionStore = new SessionStore(join(workspaceDir, "sessions"));
+    const openaiKey = process.env.OPENAI_API_KEY;
+    const embedder = openaiKey ? createOpenAIEmbedder(openaiKey) : createNoOpEmbedder();
+    const memoryIndex = new MemoryIndex(
+      join(workspaceDir, "memory", "index.sqlite"),
+      embedder,
+      workspaceDir,
+    );
+    await memoryIndex.sync();
+
+    const cronScheduler = new CronScheduler({
+      storePath: join(workspaceDir, "cron", "jobs.json"),
+      onJobDue: async () => {},
+    });
+    const tools = allTools({ cronScheduler, workspaceDir, memoryIndex });
+
+    const ctx: AgentContext = {
+      authStorage,
+      tools,
+      skills: loadSkillsFromDirs(skillDirs),
+      workspaceFiles: loadWorkspaceFiles(workspaceDir),
+      sessionStore,
+      sessionKey: "cli",
+      memoryIndex,
+    };
+
+    console.log(`> ${message}\n`);
+    const result = await runAgent(ctx, message);
+    console.log(result.text);
+    if (result.attachments.length > 0) {
+      console.log("\nAttachments:", result.attachments.join(", "));
+    }
+    return;
+  }
+
   // Default: run mode
   if (!authStorage.hasAuth()) {
-    console.error(
-      "No authentication configured.\n" +
-        "Run `bun dev login` for OAuth or `bun dev login --api-key` for API key.\n" +
-        "Or set ANTHROPIC_API_KEY in .env",
-    );
+    console.error("No authentication configured. Run `bun dev login` for OAuth login.");
     process.exit(1);
   }
 

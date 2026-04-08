@@ -137,7 +137,7 @@ async function runFlushAndCompact(opts: {
   history: LLMMessage[];
   newMessages: LLMMessage[];
   llmFn: typeof callLLM;
-  llmTools: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>;
+  llmTools: Array<{ name: string; description: string; parameters: Record<string, unknown> }>;
   toolMap: Map<string, Tool>;
   systemPrompt: string;
   totalTokens: number;
@@ -297,7 +297,7 @@ export async function runAgent(
   const llmTools = allTools.map((t) => ({
     name: t.name,
     description: t.description,
-    input_schema: t.inputSchema,
+    parameters: t.inputSchema,
   }));
 
   // Tool lookup
@@ -397,13 +397,11 @@ export async function runAgent(
     totalTokens =
       response.usage.inputTokens +
       response.usage.outputTokens +
-      response.usage.cacheCreationInputTokens +
       response.usage.cacheReadInputTokens;
     log.info("agent", "Token usage", {
       iteration: i + 1,
       inputTokens: response.usage.inputTokens,
       outputTokens: response.usage.outputTokens,
-      cacheCreation: response.usage.cacheCreationInputTokens,
       cacheRead: response.usage.cacheReadInputTokens,
     });
     const shouldFlushAndCompactNow = shouldFlushAndCompact(totalTokens);
