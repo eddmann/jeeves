@@ -290,8 +290,9 @@ export function createTelegramChannel(opts: {
           ms: Date.now() - messageStart,
           ...formatError(err),
         });
-        const errMsg = err instanceof Error ? err.message : String(err);
-        await ctx.reply(`Something went wrong: ${errMsg}`);
+        await ctx.reply(
+          "I regret to report a difficulty has arisen, sir. Perhaps another attempt?",
+        );
       }
     });
   }
@@ -324,17 +325,16 @@ export function createTelegramChannel(opts: {
       return handleIncoming(ctx, content, ctx.message.caption?.slice(0, 100) || "[photo]");
     } catch (err) {
       log.error("telegram", "Failed to process photo", formatError(err));
-      await ctx.reply("Sorry, I couldn't process that image.");
+      await ctx.reply(
+        "I'm afraid the image proved somewhat uncooperative. Might I trouble you to send it again?",
+      );
     }
   });
 
   // Voice and audio messages
   bot.on(["message:voice", "message:audio"], async (ctx) => {
     if (!opts.transcribe) {
-      await ctx.reply(
-        "Voice messages require an OpenAI API key for transcription. " +
-          "Set OPENAI_API_KEY in your .env file to enable this feature.",
-      );
+      await ctx.reply("I regret that voice messages are not presently available, sir.");
       return;
     }
 
@@ -354,14 +354,17 @@ export function createTelegramChannel(opts: {
       return handleIncoming(ctx, text, transcript.slice(0, 100));
     } catch (err) {
       log.error("telegram", "Failed to process voice message", formatError(err));
-      await ctx.reply("Sorry, I couldn't process that voice message.");
+      await ctx.reply(
+        "The voice message, I'm afraid, eluded me. Would you be so kind as to try again, or perhaps put it in writing?",
+      );
     }
   });
 
   // Fallback for unsupported message types
   bot.on("message", async (ctx) => {
     await ctx.reply(
-      "I can handle text, photos, and voice messages. " + "This message type isn't supported yet.",
+      "I'm equipped to receive text, photographs, and voice messages, sir. " +
+        "This particular format is beyond my present capabilities.",
     );
   });
 

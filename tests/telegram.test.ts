@@ -5,7 +5,13 @@ import {
   getReplyContext,
   MAX_MESSAGE_LENGTH,
 } from "../src/channel/telegram";
-import { formatProgress } from "../src/progress";
+import {
+  formatProgress,
+  THINKING_MESSAGES,
+  THINKING_EXTENDED_MESSAGES,
+  TOOL_MESSAGES,
+  FALLBACK_MESSAGES,
+} from "../src/progress";
 
 describe("markdown to Telegram HTML", () => {
   test("converts bold markers to HTML bold tags", () => {
@@ -159,31 +165,20 @@ describe("message splitting", () => {
 });
 
 describe("progress formatting", () => {
-  test("shows 'Thinking...' on first iteration", () => {
+  test("returns a thinking message on first iteration", () => {
     const result = formatProgress({ type: "thinking", iteration: 1 });
 
-    expect(result).toBe("Thinking...");
+    expect(THINKING_MESSAGES).toContain(result);
   });
 
-  test("shows step number on subsequent iterations", () => {
+  test("returns an extended thinking message on subsequent iterations", () => {
     const result = formatProgress({ type: "thinking", iteration: 3 });
 
-    expect(result).toBe("Thinking... (step 3)");
+    expect(THINKING_EXTENDED_MESSAGES).toContain(result);
   });
 
-  test("shows descriptive labels for each standard tool", () => {
-    const expected: Record<string, string> = {
-      bash: "Running command",
-      read: "Reading file",
-      write: "Writing file",
-      edit: "Editing file",
-      web_fetch: "Fetching web page",
-      web_search: "Searching the web",
-      cron: "Managing schedule",
-      memory_search: "Searching memory",
-    };
-
-    for (const [tool, label] of Object.entries(expected)) {
+  test("returns a message from the correct pool for each standard tool", () => {
+    for (const [tool, messages] of Object.entries(TOOL_MESSAGES)) {
       const result = formatProgress({
         type: "tool_running",
         iteration: 1,
@@ -192,11 +187,11 @@ describe("progress formatting", () => {
         toolCount: 1,
       });
 
-      expect(result).toBe(label);
+      expect(messages).toContain(result);
     }
   });
 
-  test("shows generic label for unknown tool names", () => {
+  test("returns a fallback message for unknown tool names", () => {
     const result = formatProgress({
       type: "tool_running",
       iteration: 1,
@@ -205,31 +200,7 @@ describe("progress formatting", () => {
       toolCount: 1,
     });
 
-    expect(result).toBe("Running custom");
-  });
-
-  test("appends index/count suffix when running multiple tools", () => {
-    const result = formatProgress({
-      type: "tool_running",
-      iteration: 1,
-      toolName: "bash",
-      toolIndex: 2,
-      toolCount: 3,
-    });
-
-    expect(result).toBe("Running command (2/3)");
-  });
-
-  test("omits suffix when running a single tool", () => {
-    const result = formatProgress({
-      type: "tool_running",
-      iteration: 1,
-      toolName: "read",
-      toolIndex: 1,
-      toolCount: 1,
-    });
-
-    expect(result).toBe("Reading file");
+    expect(FALLBACK_MESSAGES).toContain(result);
   });
 });
 
