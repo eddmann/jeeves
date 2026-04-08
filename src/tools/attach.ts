@@ -1,10 +1,13 @@
 /**
  * Attach tool — declares files to send back to the user.
+ * Only allows existing files inside the workspace outbox/ directory.
  */
 
+import { existsSync } from "fs";
+import { resolve, normalize } from "path";
 import type { Tool } from "./index";
 
-export function createAttachTool(ctx: { attachments: string[] }): Tool {
+export function createAttachTool(ctx: { attachments: string[]; workspaceDir: string }): Tool {
   return {
     name: "attach",
     description:
@@ -20,9 +23,21 @@ export function createAttachTool(ctx: { attachments: string[] }): Tool {
       required: ["path"],
     },
     async execute(input) {
-      const path = input.path as string;
-      ctx.attachments.push(path);
-      const filename = path.split("/").pop() ?? path;
+      const raw = input.path as string;
+      const outboxDir = resolve(ctx.workspaceDir, "outbox");
+      const fullPath = resolve(ctx.workspaceDir, raw);
+      const normalizedFull = normalize(fullPath);
+
+      if (!normalizedFull.startsWith(outboxDir + "/") && normalizedFull !== outboxDir) {
+        return `Error: path must be inside outbox/. Got: ${raw}`;
+      }
+
+      if (!existsSync(normalizedFull)) {
+        return `Error: file not found: ${raw}`;
+      }
+
+      ctx.attachments.push(raw);
+      const filename = raw.split("/").pop() ?? raw;
       return `Attached ${filename}`;
     },
   };

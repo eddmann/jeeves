@@ -32,6 +32,8 @@ import {
   buildWorkspaceFile,
 } from "./helpers/factories";
 import { buildStubAuth } from "./helpers/stub-auth";
+import { mkdirSync, writeFileSync } from "fs";
+import { join } from "path";
 import { MemoryIndex } from "../src/memory/index";
 import { createNoOpEmbedder } from "../src/memory/embeddings";
 
@@ -62,6 +64,7 @@ function makeCtx(opts: {
     tools: opts.tools ?? [],
     skills: opts.skills ?? [],
     workspaceFiles: opts.workspaceFiles ?? [],
+    workspaceDir: tmpDir,
     sessionStore: new SessionStore(tmpDir),
     sessionKey: "test-session",
     memoryIndex,
@@ -404,6 +407,11 @@ describe("agent loop", () => {
   });
 
   test("returns attachments accumulated via attach tool", async () => {
+    // Create outbox files so the hardened attach tool accepts them
+    mkdirSync(join(tmpDir, "outbox"), { recursive: true });
+    writeFileSync(join(tmpDir, "outbox", "chart.png"), "fake");
+    writeFileSync(join(tmpDir, "outbox", "data.csv"), "fake");
+
     const ctx = makeCtx({
       llmResponses: [
         buildLLMResponse({

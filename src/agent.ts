@@ -78,6 +78,7 @@ export interface AgentContext {
   tools: Tool[];
   skills: Skill[];
   workspaceFiles: WorkspaceFile[];
+  workspaceDir: string;
   sessionStore: SessionStore;
   sessionKey: string;
   memoryIndex: MemoryIndex;
@@ -293,7 +294,10 @@ export async function runAgent(
 
   // Build tools for LLM (attach tool created per-run with its own accumulator)
   const attachments: string[] = [];
-  const allTools = [...ctx.tools, createAttachTool({ attachments })];
+  const allTools = [
+    ...ctx.tools,
+    createAttachTool({ attachments, workspaceDir: ctx.workspaceDir }),
+  ];
   const llmTools = allTools.map((t) => ({
     name: t.name,
     description: t.description,
