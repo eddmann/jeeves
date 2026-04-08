@@ -41,7 +41,7 @@ test/watch: ## Run tests in watch mode
 	bun test tests/ --watch
 
 test/integration: ## Run integration tests (requires auth)
-	bun test tests/integration/
+	bun test tests-integration/
 
 t: test ## Alias for test
 
