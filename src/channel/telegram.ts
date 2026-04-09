@@ -75,32 +75,59 @@ export function markdownToTelegramHTML(md: string): string {
   return text;
 }
 
+/** Returns tag names that are open (unclosed) at the end of an HTML string. */
+function unclosedTags(html: string): string[] {
+  const stack: string[] = [];
+  for (const m of html.matchAll(/<\/?([a-z]+)(?:\s[^>]*)?>/gi)) {
+    if (m[0][1] === "/") {
+      const idx = stack.lastIndexOf(m[1].toLowerCase());
+      if (idx !== -1) stack.splice(idx, 1);
+    } else {
+      stack.push(m[1].toLowerCase());
+    }
+  }
+  return stack;
+}
+
+// Telegram tags are short (b, i, a, code, pre) — 50 chars covers worst-case nesting.
+const TAG_OVERHEAD = 50;
+
 /**
- * Split a message into chunks that fit within Telegram's message size limit.
+ * Split a message into chunks ≤ MAX_MESSAGE_LENGTH with balanced HTML tags.
  */
 export function splitMessage(text: string): string[] {
   if (text.length <= MAX_MESSAGE_LENGTH) return [text];
 
   const chunks: string[] = [];
   let remaining = text;
+  let carry: string[] = [];
+
   while (remaining.length > 0) {
-    if (remaining.length <= MAX_MESSAGE_LENGTH) {
-      chunks.push(remaining);
+    const prefix = carry.map((t) => `<${t}>`).join("");
+    const body = prefix + remaining;
+
+    if (body.length <= MAX_MESSAGE_LENGTH) {
+      chunks.push(body);
       break;
     }
-    // Try to split at a newline
-    let splitIdx = remaining.lastIndexOf("\n", MAX_MESSAGE_LENGTH);
-    if (splitIdx < MAX_MESSAGE_LENGTH / 2) {
-      // No good newline, split at space
-      splitIdx = remaining.lastIndexOf(" ", MAX_MESSAGE_LENGTH);
-    }
-    if (splitIdx < MAX_MESSAGE_LENGTH / 2) {
-      // No good split point, hard split
-      splitIdx = MAX_MESSAGE_LENGTH;
-    }
-    chunks.push(remaining.slice(0, splitIdx));
-    remaining = remaining.slice(splitIdx).trimStart();
+
+    const budget = MAX_MESSAGE_LENGTH - TAG_OVERHEAD;
+    let splitIdx = body.lastIndexOf("\n", budget);
+    if (splitIdx < budget / 2) splitIdx = body.lastIndexOf(" ", budget);
+    if (splitIdx < budget / 2) splitIdx = budget;
+
+    const chunk = body.slice(0, splitIdx);
+    const open = unclosedTags(chunk);
+    const closers = [...open]
+      .reverse()
+      .map((t) => `</${t}>`)
+      .join("");
+
+    chunks.push(chunk + closers);
+    remaining = body.slice(splitIdx).trimStart();
+    carry = open;
   }
+
   return chunks;
 }
 

@@ -151,8 +151,11 @@ describe("message splitting", () => {
 
     const chunks = splitMessage(msg);
 
-    expect(chunks.length).toBe(2);
-    expect(chunks[0].length).toBe(MAX_MESSAGE_LENGTH);
+    expect(chunks.length).toBeGreaterThanOrEqual(2);
+    for (const chunk of chunks) {
+      expect(chunk.length).toBeLessThanOrEqual(MAX_MESSAGE_LENGTH);
+    }
+    expect(chunks.join("")).toBe(msg);
   });
 
   test("keeps message as single chunk at exactly the limit", () => {
@@ -161,6 +164,62 @@ describe("message splitting", () => {
     const chunks = splitMessage(msg);
 
     expect(chunks).toEqual([msg]);
+  });
+
+  test("closes unclosed HTML tags at split boundary and re-opens in next chunk", () => {
+    const filler = "a".repeat(MAX_MESSAGE_LENGTH - 10);
+    const msg = `<b>${filler}\n${"b".repeat(100)}</b>`;
+
+    const chunks = splitMessage(msg);
+
+    expect(chunks.length).toBe(2);
+    expect(chunks[0]).toContain("<b>");
+    expect(chunks[0]).toEndWith("</b>");
+    expect(chunks[1]).toStartWith("<b>");
+    expect(chunks[1]).toContain("</b>");
+  });
+
+  test("handles nested HTML tags across split boundary", () => {
+    const filler = "a".repeat(MAX_MESSAGE_LENGTH - 14);
+    const msg = `<b><i>${filler}\n${"b".repeat(100)}</i></b>`;
+
+    const chunks = splitMessage(msg);
+
+    expect(chunks.length).toBe(2);
+    // First chunk should close i then b
+    expect(chunks[0]).toEndWith("</i></b>");
+    // Second chunk should re-open b then i
+    expect(chunks[1]).toStartWith("<b><i>");
+  });
+
+  test("chunks with repaired HTML tags do not exceed MAX_MESSAGE_LENGTH", () => {
+    const filler = "a".repeat(MAX_MESSAGE_LENGTH - 10);
+    const msg = `<b>${filler}\n${"b".repeat(MAX_MESSAGE_LENGTH)}</b>`;
+
+    const chunks = splitMessage(msg);
+
+    for (const chunk of chunks) {
+      expect(chunk.length).toBeLessThanOrEqual(MAX_MESSAGE_LENGTH);
+    }
+    // Verify content is still valid — all chunks together should have balanced tags
+    const joined = chunks.join("");
+    const opens = (joined.match(/<b>/g) ?? []).length;
+    const closes = (joined.match(/<\/b>/g) ?? []).length;
+    expect(opens).toBe(closes);
+  });
+
+  test("does not modify chunks with balanced HTML tags", () => {
+    const half = MAX_MESSAGE_LENGTH / 2 - 10;
+    const msg = `<b>${"a".repeat(half)}</b>\n<b>${"b".repeat(half)}</b>`;
+
+    const chunks = splitMessage(msg);
+
+    // All tags balanced — no extra closing/opening tags inserted
+    for (const chunk of chunks) {
+      const opens = (chunk.match(/<b>/g) ?? []).length;
+      const closes = (chunk.match(/<\/b>/g) ?? []).length;
+      expect(opens).toBe(closes);
+    }
   });
 });
 
